@@ -1,42 +1,217 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
+// ==========================================
+// 1. CONSTANTS & UTILITIES
+// ==========================================
 const DOS_COLORS = [
     "#000000", "#0000AA", "#00AA00", "#00AAAA", "#AA0000", "#AA00AA", "#AA5500", "#AAAAAA",
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
-const DEFAULT_CODE = `; --- DEMO: KIỂM TRA LỆNH MỚI ---
+const DEFAULT_CODE = `; --- DEMO: HELLO 8086 ĐA SẮC ---
 MOV AX, 0x1000
 MOV DS, AX
 
-; Test Parity Flag (PF) và Jump Parity (JP/JNP)
-MOV AL, 3      ; 3 = 00000011 (2 bit 1 -> Parity Even)
-OR AL, 0       ; Cập nhật cờ
-JPE PARITY_EVEN
+; Lưu chuỗi và màu sắc vào RAM (Data Segment)
+; Cấu trúc mỗi Word: [Thuộc tính màu 8-bit][Mã ASCII 8-bit]
+MOV WORD [0], 0x0C48 ; 'H' (Màu Đỏ sáng)
+MOV WORD [2], 0x0E65 ; 'e' (Màu Vàng)
+MOV WORD [4], 0x0A6C ; 'l' (Màu Xanh lá)
+MOV WORD [6], 0x0B6C ; 'l' (Màu Xanh ngọc)
+MOV WORD [8], 0x096F ; 'o' (Màu Xanh dương)
+MOV WORD [10], 0x0020 ; ' ' (Khoảng trắng)
+MOV WORD [12], 0x0D38 ; '8' (Màu Hồng)
+MOV WORD [14], 0x0C30 ; '0' (Màu Đỏ sáng)
+MOV WORD [16], 0x0E38 ; '8' (Màu Vàng)
+MOV WORD [18], 0x0A36 ; '6' (Màu Xanh lá)
 
-JMP END_TEST
-
-PARITY_EVEN:
 MOV AX, 0xB800
-MOV ES, AX
-MOV WORD [ES:0], 0x0A50 ; In chữ 'P' màu xanh lá báo hiệu Parity Even hoạt động
-; Test LOOPZ
-MOV CX, 5
-MOV AX, 0
-TEST_LOOP:
-ADD AX, 0      ; ZF = 1
-LOOPZ TEST_LOOP
+MOV ES, AX         ; ES trỏ tới Video RAM
+MOV SI, 0          ; SI trỏ tới dữ liệu nguồn trong RAM
+MOV DI, 1990       ; DI trỏ tới giữa màn hình (Hàng 12, Cột 35)
+MOV CX, 10         ; Lặp 10 lần (10 ký tự)
 
-END_TEST:
+PRINT_LOOP:
+MOV AX, [SI]       ; Đọc 1 Ký tự & Màu từ RAM
+MOV [ES:DI], AX    ; Ghi trực tiếp ra màn hình VGA
+ADD SI, 2          ; Tiến tới ký tự tiếp theo trong RAM
+ADD DI, 2          ; Tiến tới ô màn hình tiếp theo
+LOOP PRINT_LOOP
+
 HLT`;
+
+const toHex = (n, pad = 4) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
+const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & 0xFFFFF;
+const calcParity = (val) => {
+    let p = 0, v = val & 0xFF;
+    while (v) { p ^= (v & 1); v >>= 1; }
+    return (p === 0) ? 1 : 0;
+};
+
+
+// ==========================================
+// 2. UI SUB-COMPONENTS
+// ==========================================
+
+function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI }) {
+    return (
+        <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
+            <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-800 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <span className="font-bold text-white text-xl">OS</span>
+                </div>
+                <div>
+                    <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">Full ISA | VGA | Audio | 64KB Disk | Boot Support</p>
+                </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center">
+                <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
+                <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
+                <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Biên dịch</button>
+                <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">🔄 Reset</button>
+                <button onClick={toggleRun} disabled={!isAssembled} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${!isAssembled ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
+                    {isRunning ? "Dừng" : "Chạy"}
+                </button>
+                <button onClick={stepUI} disabled={isRunning || !isAssembled} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Từng bước</button>
+            </div>
+        </div>
+    );
+}
+
+function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset }) {
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px]">
+            <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
+                <div className="flex items-center space-x-2 text-[10px]">
+                    <span className="text-slate-500">ORG (Origin):</span>
+                    <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
+                </div>
+            </div>
+            <textarea value={code} onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} className="flex-1 bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-relaxed custom-scrollbar" spellCheck="false" />
+        </div>
+    );
+}
+
+function VGAMonitor({ memory, cs, ip }) {
+    return (
+        <div className="bg-slate-800 p-2 rounded-xl border-4 border-slate-700 shadow-2xl flex flex-col items-center overflow-x-auto">
+            <div className="w-full flex justify-between mb-2 px-2 text-[10px] text-slate-400 font-bold min-w-max">
+                <span>VGA 80x25 TEXT MODE</span>
+                <div className="flex space-x-2">
+                     <span className="text-blue-400">CS: {toHex(cs)}</span>
+                     <span className="text-amber-400">IP: {toHex(ip)}</span>
+                </div>
+            </div>
+            <div className="bg-black p-2 rounded border border-slate-900 font-mono text-[11px] leading-none whitespace-pre select-none ring-2 ring-black">
+                {Array.from({ length: 25 }).map((_, y) => (
+                    <div key={y} className="flex h-[1.1em]">
+                        {Array.from({ length: 80 }).map((_, x) => {
+                            const offset = (y * 80 + x) * 2;
+                            const charCode = memory[0xB8000 + offset];
+                            const attr = memory[0xB8000 + offset + 1] || 0x07;
+                            const fg = DOS_COLORS[attr & 0x0F];
+                            const bg = DOS_COLORS[(attr >> 4) & 0x0F];
+                            const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
+                            return (
+                                <span key={x} style={{ color: fg, backgroundColor: bg, width: '1ch', textAlign: 'center', display: 'inline-block' }}>
+                                    {displayChar}
+                                </span>
+                            );
+                        })}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function DiskViewer({ diskMemory }) {
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-48">
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (Sector 0-31 = Boot)</h2>
+            </div>
+            <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
+                {Array.from({ length: 32 }).map((_, i) => (
+                    <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
+                        <span className="text-slate-600 mb-1">SEC {i.toString().padStart(2, '0')}</span>
+                        <div className="flex flex-wrap gap-1">
+                            {Array.from({ length: 16 }).map((_, b) => (
+                                <span key={b} className={diskMemory[i * 16 + b] !== 0 ? "text-amber-400" : "text-slate-900"}>
+                                    {diskMemory[i * 16 + b].toString(16).toUpperCase().padStart(2, '0')}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig, ioLogs }) {
+    const e = eng.current;
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 shadow-xl flex flex-col">
+            <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-1">
+                <h2 className="text-xs font-bold text-slate-400 uppercase font-mono tracking-tighter">Registers</h2>
+                <span className="text-[9px] text-slate-500 italic">Editable</span>
+            </div>
+            <div className="space-y-1 text-xs mb-3">
+                {["AX", "BX", "CX", "DX", "SI", "DI", "SP", "BP", "CS", "DS", "SS", "ES", "IP"].map(reg => (
+                    <div key={reg} className="flex justify-between items-center font-mono">
+                        <span className="text-blue-400 font-bold">{reg}</span>
+                        <input 
+                            type="text"
+                            defaultValue={toHex(e.reg[reg])}
+                            key={`${reg}-${e.reg[reg]}`}
+                            onBlur={(ev) => handleRegChange(reg, ev.target.value)}
+                            disabled={isRunning}
+                            className="w-14 bg-slate-950 text-emerald-400 border border-slate-700 rounded px-1 py-0.5 text-right text-[11px] focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                        />
+                    </div>
+                ))}
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[9px] uppercase font-bold text-slate-500 border-t border-slate-800 pt-2">
+                <span>ZF: {e.flags.ZF}</span><span>CF: {e.flags.CF}</span>
+                <span>SF: {e.flags.SF}</span><span>OF: {e.flags.OF}</span>
+                <span>DF: {e.flags.DF}</span><span>IF: {e.flags.IF}</span>
+                <span>PF: {e.flags.PF}</span><span>AF: {e.flags.AF}</span>
+            </div>
+            
+            <div className="mt-2 text-[11px] font-mono text-center text-fuchsia-400 bg-slate-950/80 py-1 rounded border border-slate-800">
+                {packFlags().toString(2).padStart(16, '0').replace(/(.{4})/g, '$1 ').trim()}
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-slate-800">
+                <div className="text-[9px] font-bold text-slate-500 uppercase mb-2">BIOS Status</div>
+                <div className="text-[10px] space-y-1">
+                    <div className="flex justify-between"><span>Boot Sig:</span> <span className={hasBootSig ? "text-emerald-500" : "text-red-500"}>{hasBootSig ? "0xAA55" : "MISSING"}</span></div>
+                    <div className="flex justify-between"><span>Audio:</span> <span className={e.beeping ? "text-amber-400" : "text-slate-600"}>{e.beeping ? "ON" : "OFF"}</span></div>
+                </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-800 text-[9px] text-slate-600 font-mono">
+                System Logs:
+                <div className="h-24 overflow-hidden mt-1 opacity-50 custom-scrollbar">
+                     {ioLogs.slice(-5).map((log, i) => <div key={i}>{">"} {log}</div>)}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ==========================================
+// 3. MAIN APP & CPU CORE LOGIC
+// ==========================================
 
 export default function Emulator8086() {
     const [code, setCode] = useState(DEFAULT_CODE);
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
-    const [memSegStr, setMemSegStr] = useState("0x0000");
-    const [memOffStr, setMemOffStr] = useState("0x0000");
     const [orgOffset, setOrgOffset] = useState("0x0000");
     const [ioLogs, setIoLogs] = useState([]);
     
@@ -64,19 +239,7 @@ export default function Emulator8086() {
         bootMode: false
     });
 
-    const addLog = (msg) => {
-        setIoLogs(prev => [...prev, msg].slice(-20));
-    };
-
-    const toHex = (n, pad = 4) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
-    
-    const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & 0xFFFFF;
-
-    const calcParity = (val) => {
-        let p = 0, v = val & 0xFF;
-        while (v) { p ^= (v & 1); v >>= 1; }
-        return (p === 0) ? 1 : 0;
-    };
+    const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-20));
 
     const handleRegChange = (reg, valStr) => {
         let val = parseInt(valStr.replace(/0x/i, ''), 16);
@@ -89,14 +252,10 @@ export default function Emulator8086() {
         setIsRunning(false);
         isRunningRef.current = false;
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = 0xFFFE;
-        
-        const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
-        e.reg.IP = startIP;
-        
+        e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         setErrorMessage(null);
         forceRender();
@@ -120,13 +279,8 @@ export default function Emulator8086() {
     };
 
     const initAudio = () => {
-        if (!audioCtxRef.current) {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            audioCtxRef.current = new AudioContext();
-        }
-        if (audioCtxRef.current.state === 'suspended') {
-            audioCtxRef.current.resume();
-        }
+        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
     };
 
     const playBeep = (freq) => {
@@ -145,10 +299,7 @@ export default function Emulator8086() {
     };
 
     const stopAudio = () => {
-        if (oscRef.current) {
-            try { oscRef.current.stop(); } catch (e) { }
-            oscRef.current = null;
-        }
+        if (oscRef.current) { try { oscRef.current.stop(); } catch (e) { } oscRef.current = null; }
     };
 
     const handleKeyDown = (e) => {
@@ -218,63 +369,36 @@ export default function Emulator8086() {
         }
     };
 
-    const push16 = (val) => {
-        const e = eng.current;
-        e.reg.SP = (e.reg.SP - 2) & 0xFFFF;
-        writeMemWord(calcPhys(e.reg.SS, e.reg.SP), val);
-    };
-
-    const pop16 = () => {
-        const e = eng.current;
-        const val = readMemWord(calcPhys(e.reg.SS, e.reg.SP));
-        e.reg.SP = (e.reg.SP + 2) & 0xFFFF;
-        return val;
-    };
+    const push16 = (val) => { const e = eng.current; e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeMemWord(calcPhys(e.reg.SS, e.reg.SP), val); };
+    const pop16 = () => { const e = eng.current; const val = readMemWord(calcPhys(e.reg.SS, e.reg.SP)); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
 
     const packFlags = () => {
-        const f = eng.current.flags;
-        let r = 0;
-        if (f.CF) r |= (1 << 0);
-        if (f.PF) r |= (1 << 2);
-        if (f.AF) r |= (1 << 4);
-        if (f.ZF) r |= (1 << 6);
-        if (f.SF) r |= (1 << 7);
-        if (f.IF) r |= (1 << 9);
-        if (f.DF) r |= (1 << 10);
-        if (f.OF) r |= (1 << 11);
+        const f = eng.current.flags; let r = 0;
+        if (f.CF) r |= (1 << 0); if (f.PF) r |= (1 << 2); if (f.AF) r |= (1 << 4);
+        if (f.ZF) r |= (1 << 6); if (f.SF) r |= (1 << 7); if (f.IF) r |= (1 << 9);
+        if (f.DF) r |= (1 << 10); if (f.OF) r |= (1 << 11);
         return r;
     };
 
     const unpackFlags = (r) => {
         const f = eng.current.flags;
-        f.CF = (r & (1 << 0)) ? 1 : 0;
-        f.PF = (r & (1 << 2)) ? 1 : 0;
-        f.AF = (r & (1 << 4)) ? 1 : 0;
-        f.ZF = (r & (1 << 6)) ? 1 : 0;
-        f.SF = (r & (1 << 7)) ? 1 : 0;
-        f.IF = (r & (1 << 9)) ? 1 : 0;
-        f.DF = (r & (1 << 10)) ? 1 : 0;
-        f.OF = (r & (1 << 11)) ? 1 : 0;
+        f.CF = (r & (1 << 0)) ? 1 : 0; f.PF = (r & (1 << 2)) ? 1 : 0; f.AF = (r & (1 << 4)) ? 1 : 0;
+        f.ZF = (r & (1 << 6)) ? 1 : 0; f.SF = (r & (1 << 7)) ? 1 : 0; f.IF = (r & (1 << 9)) ? 1 : 0;
+        f.DF = (r & (1 << 10)) ? 1 : 0; f.OF = (r & (1 << 11)) ? 1 : 0;
     };
 
     const writeToVGA = (c) => {
         const e = eng.current;
         for (let i = 0; i < 2000; i++) {
-            if (e.mem[0xB8000 + i * 2] === 0) {
-                e.mem[0xB8000 + i * 2] = c.charCodeAt(0);
-                e.mem[0xB8000 + i * 2 + 1] = 0x07;
-                break;
-            }
+            if (e.mem[0xB8000 + i * 2] === 0) { e.mem[0xB8000 + i * 2] = c.charCodeAt(0); e.mem[0xB8000 + i * 2 + 1] = 0x07; break; }
         }
     };
 
     const assemble = () => {
         resetCPU();
         const e = eng.current;
-        
         const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.reg.IP = startIP;
-        
         e.insts = new Array(startIP).fill({ op: "NOP", args: [], originalLine: 0 });
         e.labels = {};
         
@@ -283,10 +407,7 @@ export default function Emulator8086() {
         for (let i = 0; i < lines.length; i++) {
             let l = lines[i].split(';')[0].trim();
             if (!l) continue;
-            if (l.endsWith(':')) {
-                e.labels[l.replace(/:$/, '').toUpperCase()] = idx;
-                continue;
-            }
+            if (l.endsWith(':')) { e.labels[l.replace(/:$/, '').toUpperCase()] = idx; continue; }
             const firstSpace = l.indexOf(' ');
             let op = firstSpace !== -1 ? l.substring(0, firstSpace).trim().toUpperCase() : l.toUpperCase();
             let argsStr = firstSpace !== -1 ? l.substring(firstSpace).trim() : "";
@@ -299,9 +420,7 @@ export default function Emulator8086() {
     };
 
     const executeStep = () => {
-        const e = eng.current;
-        const r = e.reg;
-        const f = e.flags;
+        const e = eng.current; const r = e.reg; const f = e.flags;
 
         if (e.bootMode) {
             const opCode = e.mem[r.IP];
@@ -318,10 +437,7 @@ export default function Emulator8086() {
 
         if (r.IP >= e.insts.length) return false;
         const inst = e.insts[r.IP];
-        
-        if (inst && inst.op === "NOP" && inst.originalLine === 0) {
-            r.IP++; return true;
-        }
+        if (inst && inst.op === "NOP" && inst.originalLine === 0) { r.IP++; return true; }
 
         let nextIP = r.IP + 1;
         let op = inst.op;
@@ -330,17 +446,12 @@ export default function Emulator8086() {
 
         if (["REP", "REPE", "REPZ", "REPNE", "REPNZ"].includes(op)) {
             if (r.CX === 0) { r.IP = nextIP; return true; }
-            prefix = op;
-            op = args.length > 0 ? args[0].toUpperCase() : "NOP";
-            args = args.slice(1);
+            prefix = op; op = args.length > 0 ? args[0].toUpperCase() : "NOP"; args = args.slice(1);
         }
         
         switch (op) {
-            // Memory & Move
             case "MOV": writeOpVal(args[0], getOpVal(args[1])); break;
-            case "XCHG": {
-                const t = getOpVal(args[0]); writeOpVal(args[0], getOpVal(args[1])); writeOpVal(args[1], t); break;
-            }
+            case "XCHG": { const t = getOpVal(args[0]); writeOpVal(args[0], getOpVal(args[1])); writeOpVal(args[1], t); break; }
             case "LEA": {
                 let inner = args[1].replace(/[\[\]]/g, '').trim();
                 if (inner.includes(':')) inner = inner.split(':')[1];
@@ -349,12 +460,9 @@ export default function Emulator8086() {
             case "LDS": case "LES": {
                 const addr = calcPhys(r.DS, resolveOffset(args[1].replace(/[\[\]]/g, '')));
                 writeOpVal(args[0], readMemWord(addr));
-                r[op === "LDS" ? "DS" : "ES"] = readMemWord(addr + 2);
-                break;
+                r[op === "LDS" ? "DS" : "ES"] = readMemWord(addr + 2); break;
             }
             case "XLAT": r.AX = (r.AX & 0xFF00) | e.mem[calcPhys(r.DS, (r.BX + (r.AX & 0xFF)) & 0xFFFF)]; break;
-
-            // Arithmetic
             case "ADD": case "SUB": case "CMP": case "ADC": case "SBB": {
                 const v1 = getOpVal(args[0]); const v2 = getOpVal(args[1]); let res = 0;
                 if (op === "ADD") { res = v1 + v2; f.CF = res > 0xFFFF ? 1 : 0; f.AF = ((v1 ^ v2 ^ res) & 0x10) ? 1 : 0; }
@@ -362,59 +470,29 @@ export default function Emulator8086() {
                 if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > 0xFFFF ? 1 : 0; }
                 if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; }
                 if (op !== "CMP") writeOpVal(args[0], res);
-                f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res);
-                break;
+                f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res); break;
             }
             case "MUL": case "IMUL": {
                 const u1 = r.AX & 0xFFFF; const u2 = getOpVal(args[0]) & 0xFFFF;
-                if (op === "MUL") {
-                    const ur = (u1 * u2) >>> 0; r.AX = ur & 0xFFFF; r.DX = (ur >>> 16) & 0xFFFF;
-                    f.CF = f.OF = r.DX !== 0 ? 1 : 0;
-                } else {
-                    const sr = ((u1 << 16) >> 16) * ((u2 << 16) >> 16);
-                    r.AX = sr & 0xFFFF; r.DX = (sr >> 16) & 0xFFFF;
-                    f.CF = f.OF = ((r.AX & 0x8000) ? r.DX === 0xFFFF : r.DX === 0) ? 0 : 1;
-                }
+                if (op === "MUL") { const ur = (u1 * u2) >>> 0; r.AX = ur & 0xFFFF; r.DX = (ur >>> 16) & 0xFFFF; f.CF = f.OF = r.DX !== 0 ? 1 : 0; } 
+                else { const sr = ((u1 << 16) >> 16) * ((u2 << 16) >> 16); r.AX = sr & 0xFFFF; r.DX = (sr >> 16) & 0xFFFF; f.CF = f.OF = ((r.AX & 0x8000) ? r.DX === 0xFFFF : r.DX === 0) ? 0 : 1; }
                 break;
             }
             case "DIV": case "IDIV": {
                 const d = getOpVal(args[0]) & 0xFFFF; if (d === 0) throw new Error("Divide by zero");
-                if (op === "DIV") {
-                    const dvnd = ((r.DX & 0xFFFF) * 0x10000) + (r.AX & 0xFFFF);
-                    const q = Math.floor(dvnd / d); if (q > 0xFFFF) throw new Error("Divide overflow");
-                    r.AX = q & 0xFFFF; r.DX = (dvnd % d) & 0xFFFF;
-                } else {
-                    const dvnd = (r.DX << 16) | (r.AX & 0xFFFF); const ds = (d << 16) >> 16;
-                    const q = Math.trunc(dvnd / ds);
-                    if (q > 32767 || q < -32768) throw new Error("Divide overflow");
-                    r.AX = q & 0xFFFF; r.DX = (dvnd % ds) & 0xFFFF;
-                }
+                if (op === "DIV") { const dvnd = ((r.DX & 0xFFFF) * 0x10000) + (r.AX & 0xFFFF); const q = Math.floor(dvnd / d); if (q > 0xFFFF) throw new Error("Divide overflow"); r.AX = q & 0xFFFF; r.DX = (dvnd % d) & 0xFFFF; } 
+                else { const dvnd = (r.DX << 16) | (r.AX & 0xFFFF); const ds = (d << 16) >> 16; const q = Math.trunc(dvnd / ds); if (q > 32767 || q < -32768) throw new Error("Divide overflow"); r.AX = q & 0xFFFF; r.DX = (dvnd % ds) & 0xFFFF; }
                 break;
             }
-            case "INC": case "DEC": {
-                const v = op === "INC" ? getOpVal(args[0]) + 1 : getOpVal(args[0]) - 1;
-                writeOpVal(args[0], v);
-                f.ZF = (v & 0xFFFF) === 0 ? 1 : 0; f.SF = (v & 0x8000) ? 1 : 0; f.PF = calcParity(v);
-                break;
-            }
-            case "NEG": {
-                const v = getOpVal(args[0]); const nr = (0 - v) & 0xFFFF;
-                writeOpVal(args[0], nr); f.CF = v === 0 ? 0 : 1; f.ZF = nr === 0 ? 1 : 0; f.SF = (nr & 0x8000) ? 1 : 0; f.PF = calcParity(nr); break;
-            }
-
-            // Bitwise & Logic
+            case "INC": case "DEC": { const v = op === "INC" ? getOpVal(args[0]) + 1 : getOpVal(args[0]) - 1; writeOpVal(args[0], v); f.ZF = (v & 0xFFFF) === 0 ? 1 : 0; f.SF = (v & 0x8000) ? 1 : 0; f.PF = calcParity(v); break; }
+            case "NEG": { const v = getOpVal(args[0]); const nr = (0 - v) & 0xFFFF; writeOpVal(args[0], nr); f.CF = v === 0 ? 0 : 1; f.ZF = nr === 0 ? 1 : 0; f.SF = (nr & 0x8000) ? 1 : 0; f.PF = calcParity(nr); break; }
             case "AND": case "OR": case "XOR": {
                 const l1 = getOpVal(args[0]); const l2 = getOpVal(args[1]); let lr = 0;
                 if (op === "AND") lr = l1 & l2; else if (op === "OR") lr = l1 | l2; else lr = l1 ^ l2;
                 writeOpVal(args[0], lr); f.CF = 0; f.OF = 0; f.ZF = (lr & 0xFFFF) === 0 ? 1 : 0; f.SF = (lr & 0x8000) ? 1 : 0; f.PF = calcParity(lr); break;
             }
-            case "TEST": {
-                const res = getOpVal(args[0]) & getOpVal(args[1]);
-                f.CF = 0; f.OF = 0; f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res); break;
-            }
+            case "TEST": { const res = getOpVal(args[0]) & getOpVal(args[1]); f.CF = 0; f.OF = 0; f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res); break; }
             case "NOT": writeOpVal(args[0], ~getOpVal(args[0]) & 0xFFFF); break;
-            
-            // Shifts & Rotates
             case "SHL": case "SAL": case "SHR": case "SAR": case "ROL": case "ROR": case "RCL": case "RCR": {
                 let sv = getOpVal(args[0]); const sc = getOpVal(args[1]) & 0x1F;
                 for (let i = 0; i < sc; i++) {
@@ -428,16 +506,8 @@ export default function Emulator8086() {
                 }
                 writeOpVal(args[0], sv); f.ZF = sv === 0 ? 1 : 0; f.SF = (sv & 0x8000) ? 1 : 0; f.PF = calcParity(sv); break;
             }
-
-            // String OPs (Bao gồm các Alias)
-            case "MOVSB": case "MOVSW": case "MOVS":
-            case "LODSB": case "LODSW": case "LODS":
-            case "STOSB": case "STOSW": case "STOS":
-            case "CMPSB": case "CMPSW": case "CMPS":
-            case "SCASB": case "SCASW": case "SCAS": {
-                const sz = (op.endsWith("W") || args.includes("WORD")) ? 2 : 1; 
-                const dir = f.DF === 0 ? sz : -sz;
-                
+            case "MOVSB": case "MOVSW": case "MOVS": case "LODSB": case "LODSW": case "LODS": case "STOSB": case "STOSW": case "STOS": case "CMPSB": case "CMPSW": case "CMPS": case "SCASB": case "SCASW": case "SCAS": {
+                const sz = (op.endsWith("W") || args.includes("WORD")) ? 2 : 1; const dir = f.DF === 0 ? sz : -sz;
                 if (op.startsWith("MOVS")) {
                     const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
                     if (sz === 1) e.mem[d] = e.mem[s]; else writeMemWord(d, readMemWord(s));
@@ -463,8 +533,6 @@ export default function Emulator8086() {
                 }
                 break;
             }
-
-            // BCD & ASCII Adjusts
             case "AAA": if ((r.AX & 0x0F) > 9 || f.AF === 1) { r.AX = (r.AX + 6) & 0xFFFF; r.AX = (((r.AX >> 8) + 1) << 8) | (r.AX & 0xFF); f.AF = 1; f.CF = 1; } else { f.AF = 0; f.CF = 0; } r.AX &= 0xFF0F; break;
             case "AAS": if ((r.AX & 0x0F) > 9 || f.AF === 1) { r.AX = (r.AX - 6) & 0xFFFF; r.AX = (((r.AX >> 8) - 1) << 8) | (r.AX & 0xFF); f.AF = 1; f.CF = 1; } else { f.AF = 0; f.CF = 0; } r.AX &= 0xFF0F; break;
             case "AAM": { const al = r.AX & 0xFF; r.AX = (Math.floor(al / 10) << 8) | (al % 10); break; }
@@ -473,8 +541,6 @@ export default function Emulator8086() {
             case "DAS": { let al = r.AX & 0xFF; let oldCf = f.CF; if ((al & 0x0F) > 9 || f.AF === 1) { al -= 6; f.CF = oldCf | (al < 0 ? 1 : 0); f.AF = 1; } else f.AF = 0; if (al > 0x9F || oldCf === 1) { al -= 0x60; f.CF = 1; } r.AX = (r.AX & 0xFF00) | (al & 0xFF); break; }
             case "CBW": r.AX = (r.AX & 0x80) ? (0xFF00 | (r.AX & 0xFF)) : (r.AX & 0xFF); break;
             case "CWD": r.DX = (r.AX & 0x8000) ? 0xFFFF : 0x0000; break;
-
-            // HW I/O
             case "OUT": {
                 const port = getOpVal(args[0]); const val = getOpVal(args[1]) & 0xFF;
                 if (port === 0x70) e.diskSectorSelect = val % 256;
@@ -495,12 +561,9 @@ export default function Emulator8086() {
                 break;
             }
             case "IN": writeOpVal(args[0], e.ioPorts[getOpVal(args[1])] || 0); break;
-            
-            // Jumps & Loops
             case "LOOP": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "LOOPE": case "LOOPZ": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0 && f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "LOOPNE": case "LOOPNZ": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0 && f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
-            
             case "JZ": case "JE": if (f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "JNZ": case "JNE": if (f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "JA": case "JNBE": if (f.CF === 0 && f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
@@ -518,27 +581,14 @@ export default function Emulator8086() {
             case "JNO": if (f.OF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "JS": if (f.SF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
             case "JNS": if (f.SF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
-            
             case "JMP": nextIP = e.labels[args[0].toUpperCase()]; break;
             case "CALL": push16(nextIP); nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "RET": 
-                nextIP = pop16(); 
-                if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; 
-                break;
-            case "RETF": 
-                nextIP = pop16(); r.CS = pop16(); 
-                if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; 
-                break;
-
-            // Stack, Interrupts & Flags
+            case "RET": nextIP = pop16(); if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; break;
+            case "RETF": nextIP = pop16(); r.CS = pop16(); if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; break;
             case "PUSH": push16(getOpVal(args[0])); break;
             case "POP": writeOpVal(args[0], pop16()); break;
-            case "PUSHA": 
-                // Mô phỏng lệnh PUSHA mở rộng (dành cho 80186 trở lên nhưng rất hay dùng)
-                { const sp = r.SP; push16(r.AX); push16(r.CX); push16(r.DX); push16(r.BX); push16(sp); push16(r.BP); push16(r.SI); push16(r.DI); break; }
-            case "POPA": 
-                r.DI = pop16(); r.SI = pop16(); r.BP = pop16(); pop16(); r.BX = pop16(); r.DX = pop16(); r.CX = pop16(); r.AX = pop16(); break;
-            
+            case "PUSHA": { const sp = r.SP; push16(r.AX); push16(r.CX); push16(r.DX); push16(r.BX); push16(sp); push16(r.BP); push16(r.SI); push16(r.DI); break; }
+            case "POPA": r.DI = pop16(); r.SI = pop16(); r.BP = pop16(); pop16(); r.BX = pop16(); r.DX = pop16(); r.CX = pop16(); r.AX = pop16(); break;
             case "PUSHF": push16(packFlags()); break;
             case "POPF": unpackFlags(pop16()); break;
             case "LAHF": r.AX = (r.AX & 0xFF00) | (packFlags() & 0xFF); break;
@@ -549,30 +599,24 @@ export default function Emulator8086() {
             case "INT": {
                 const vec = getOpVal(args[0]);
                 push16(packFlags()); push16(r.CS); push16(nextIP);
-                nextIP = readMemWord(vec * 4); r.CS = readMemWord(vec * 4 + 2);
-                break;
+                nextIP = readMemWord(vec * 4); r.CS = readMemWord(vec * 4 + 2); break;
             }
             case "INTO": {
-                if (f.OF === 1) {
-                    push16(packFlags()); push16(r.CS); push16(nextIP);
-                    nextIP = readMemWord(4 * 4); r.CS = readMemWord(4 * 4 + 2); // INT 4
-                }
+                if (f.OF === 1) { push16(packFlags()); push16(r.CS); push16(nextIP); nextIP = readMemWord(4 * 4); r.CS = readMemWord(4 * 4 + 2); }
                 break;
             }
             case "IRET": nextIP = pop16(); r.CS = pop16(); unpackFlags(pop16()); break;
-            
             case "WAIT": case "LOCK": case "ESC": case "NOP": break;
             case "HLT": return false;
             default: break;
         }
         
-        // Hoàn tất xử lý Repeat prefix
         if (prefix) {
             r.CX = (r.CX - 1) & 0xFFFF;
             let repeat = r.CX !== 0;
             if (prefix === "REPE" || prefix === "REPZ") repeat = repeat && f.ZF === 1;
             if (prefix === "REPNE" || prefix === "REPNZ") repeat = repeat && f.ZF === 0;
-            if (repeat) nextIP = r.IP; // Quay lại lệnh hiện tại
+            if (repeat) nextIP = r.IP;
         }
 
         r.IP = nextIP;
@@ -580,119 +624,56 @@ export default function Emulator8086() {
     };
 
     const stepUI = () => {
-        try {
-            executeStep();
-            forceRender();
-        } catch (ex) {
-            setErrorMessage(ex.message);
-            setIsRunning(false);
-            isRunningRef.current = false;
-        }
+        try { executeStep(); forceRender(); } catch (ex) { setErrorMessage(ex.message); setIsRunning(false); isRunningRef.current = false; }
     };
 
     const runLoop = useCallback(() => {
         if (!isRunningRef.current) return;
-        
         let ok = true;
-        try {
-            for (let i = 0; i < 20; i++) {
-                if (!executeStep()) {
-                    ok = false;
-                    break;
-                }
-            }
-        } catch (ex) {
-            setErrorMessage(ex.message);
-            ok = false;
-        }
-
+        try { for (let i = 0; i < 20; i++) { if (!executeStep()) { ok = false; break; } } } 
+        catch (ex) { setErrorMessage(ex.message); ok = false; }
         forceRender();
-
-        if (ok) {
-            requestRef.current = requestAnimationFrame(runLoop);
-        } else {
-            setIsRunning(false);
-            isRunningRef.current = false;
-        }
+        if (ok) requestRef.current = requestAnimationFrame(runLoop);
+        else { setIsRunning(false); isRunningRef.current = false; }
     }, []);
 
     const toggleRun = () => {
         if (isRunning) {
-            setIsRunning(false);
-            isRunningRef.current = false;
+            setIsRunning(false); isRunningRef.current = false;
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         } else {
-            setIsRunning(true);
-            isRunningRef.current = true;
+            setIsRunning(true); isRunningRef.current = true;
             requestRef.current = requestAnimationFrame(runLoop);
         }
     };
 
     const bootFromDisk = () => {
         const e = eng.current;
-        if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) {
-            setErrorMessage("Không tìm thấy chữ ký Boot 0xAA55!");
-            return;
-        }
+        if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) { setErrorMessage("Không tìm thấy chữ ký Boot 0xAA55!"); return; }
         resetCPU();
         for (let i = 0; i < 512; i++) e.mem[0x7C00 + i] = e.disk[i];
-        e.reg.IP = 0x7C00;
-        e.reg.CS = 0x0000;
-        e.bootMode = true;
+        e.reg.IP = 0x7C00; e.reg.CS = 0x0000; e.bootMode = true;
         addLog("BIOS: Booting from disk at 0x7C00...");
-        setIsAssembled(true);
-        setIsRunning(true);
-        isRunningRef.current = true;
+        setIsAssembled(true); setIsRunning(true); isRunningRef.current = true;
         requestRef.current = requestAnimationFrame(runLoop);
     };
 
     useEffect(() => {
-        return () => {
-            if (requestRef.current) cancelAnimationFrame(requestRef.current);
-            stopAudio();
-        };
+        return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); stopAudio(); };
     }, []);
 
     const e = eng.current;
-    const viewPhys = calcPhys(parseInt(memSegStr, 16) || 0, parseInt(memOffStr, 16) || 0);
     const hasBootSig = e.disk[510] === 0x55 && e.disk[511] === 0xAA;
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} tabIndex="0">
             <div className="max-w-[1400px] mx-auto space-y-6 outline-none">
-
-                <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
-                    <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-800 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                            <span className="font-bold text-white text-xl">OS</span>
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
-                            <p className="text-[10px] text-slate-400 uppercase tracking-widest">Full ISA | VGA | Audio | 64KB Disk | Boot Support</p>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center">
-                        <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">
-                            🔊 Audio
-                        </button>
-                        <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">
-                            🚀 Boot
-                        </button>
-                        <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">
-                            Biên dịch
-                        </button>
-                        <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">
-                            🔄 Reset
-                        </button>
-                        <button onClick={toggleRun} disabled={!isAssembled || errorMessage != null} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${!isAssembled ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
-                            {isRunning ? "Dừng" : "Chạy"}
-                        </button>
-                        <button onClick={stepUI} disabled={isRunning || !isAssembled || errorMessage != null} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">
-                            Từng bước
-                        </button>
-                    </div>
-                </div>
+                
+                <HeaderControls 
+                    isRunning={isRunning} isAssembled={isAssembled} initAudio={initAudio} 
+                    bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset} 
+                    toggleRun={toggleRun} stepUI={stepUI} 
+                />
 
                 {errorMessage && (
                     <div className="bg-red-950/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg shadow-lg flex">
@@ -702,126 +683,16 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px]">
-                            <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
-                                <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
-                                <div className="flex items-center space-x-2 text-[10px]">
-                                    <span className="text-slate-500">ORG (Origin):</span>
-                                    <input 
-                                        type="text" 
-                                        value={orgOffset} 
-                                        onChange={ev => setOrgOffset(ev.target.value)}
-                                        className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500"
-                                    />
-                                </div>
-                            </div>
-                            <textarea 
-                                value={code} 
-                                onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} 
-                                className="flex-1 bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-relaxed custom-scrollbar" 
-                                spellCheck="false"
-                            />
-                        </div>
+                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
-                        <div className="bg-slate-800 p-2 rounded-xl border-4 border-slate-700 shadow-2xl flex flex-col items-center overflow-x-auto">
-                            <div className="w-full flex justify-between mb-2 px-2 text-[10px] text-slate-400 font-bold min-w-max">
-                                <span>VGA 80x25 TEXT MODE</span>
-                                <div className="flex space-x-2">
-                                     <span className="text-blue-400">CS: {toHex(e.reg.CS)}</span>
-                                     <span className="text-amber-400">IP: {toHex(e.reg.IP)}</span>
-                                </div>
-                            </div>
-                            <div className="bg-black p-2 rounded border border-slate-900 font-mono text-[11px] leading-none whitespace-pre select-none ring-2 ring-black">
-                                {Array.from({ length: 25 }).map((_, y) => (
-                                    <div key={y} className="flex h-[1.1em]">
-                                        {Array.from({ length: 80 }).map((_, x) => {
-                                            const offset = (y * 80 + x) * 2;
-                                            const charCode = e.mem[0xB8000 + offset];
-                                            const attr = e.mem[0xB8000 + offset + 1] || 0x07;
-                                            const fg = DOS_COLORS[attr & 0x0F];
-                                            const bg = DOS_COLORS[(attr >> 4) & 0x0F];
-                                            const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
-                                            return (
-                                                <span key={x} style={{ color: fg, backgroundColor: bg, width: '1ch', textAlign: 'center', display: 'inline-block' }}>
-                                                    {displayChar}
-                                                </span>
-                                            );
-                                        })}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-48">
-                            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (Sector 0-31 = Boot)</h2>
-                            </div>
-                            <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
-                                {Array.from({ length: 32 }).map((_, i) => (
-                                    <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
-                                        <span className="text-slate-600 mb-1">SEC {i.toString().padStart(2, '0')}</span>
-                                        <div className="flex flex-wrap gap-1">
-                                            {Array.from({ length: 16 }).map((_, b) => (
-                                                <span key={b} className={e.disk[i * 16 + b] !== 0 ? "text-amber-400" : "text-slate-900"}>
-                                                    {e.disk[i * 16 + b].toString(16).toUpperCase().padStart(2, '0')}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} />
+                        <DiskViewer diskMemory={e.disk} />
                     </div>
 
                     <div className="lg:col-span-2 space-y-4">
-                        <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 shadow-xl flex flex-col">
-                            <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-1">
-                                <h2 className="text-xs font-bold text-slate-400 uppercase font-mono tracking-tighter">Registers</h2>
-                                <span className="text-[9px] text-slate-500 italic">Editable</span>
-                            </div>
-                            <div className="space-y-1 text-xs mb-3">
-                                {["AX", "BX", "CX", "DX", "SI", "DI", "SP", "BP", "CS", "DS", "SS", "ES", "IP"].map(reg => (
-                                    <div key={reg} className="flex justify-between items-center font-mono">
-                                        <span className="text-blue-400 font-bold">{reg}</span>
-                                        <input 
-                                            type="text"
-                                            defaultValue={toHex(e.reg[reg])}
-                                            key={`${reg}-${e.reg[reg]}`}
-                                            onBlur={(ev) => handleRegChange(reg, ev.target.value)}
-                                            disabled={isRunning}
-                                            className="w-14 bg-slate-950 text-emerald-400 border border-slate-700 rounded px-1 py-0.5 text-right text-[11px] focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="grid grid-cols-2 gap-1 text-[9px] uppercase font-bold text-slate-500 border-t border-slate-800 pt-2">
-                                <span>ZF: {e.flags.ZF}</span><span>CF: {e.flags.CF}</span>
-                                <span>SF: {e.flags.SF}</span><span>OF: {e.flags.OF}</span>
-                                <span>DF: {e.flags.DF}</span><span>IF: {e.flags.IF}</span>
-                                <span>PF: {e.flags.PF}</span><span>AF: {e.flags.AF}</span>
-                            </div>
-                            
-                            <div className="mt-2 text-[11px] font-mono text-center text-fuchsia-400 bg-slate-950/80 py-1 rounded border border-slate-800">
-                                {packFlags().toString(2).padStart(16, '0').replace(/(.{4})/g, '$1 ').trim()}
-                            </div>
-                            
-                            <div className="mt-4 pt-4 border-t border-slate-800">
-                                <div className="text-[9px] font-bold text-slate-500 uppercase mb-2">BIOS Status</div>
-                                <div className="text-[10px] space-y-1">
-                                    <div className="flex justify-between"><span>Boot Sig:</span> <span className={hasBootSig ? "text-emerald-500" : "text-red-500"}>{hasBootSig ? "0xAA55" : "MISSING"}</span></div>
-                                    <div className="flex justify-between"><span>Audio:</span> <span className={e.beeping ? "text-amber-400" : "text-slate-600"}>{e.beeping ? "ON" : "OFF"}</span></div>
-                                </div>
-                            </div>
-
-                            <div className="mt-4 pt-4 border-t border-slate-800 text-[9px] text-slate-600 font-mono">
-                                System Logs:
-                                <div className="h-24 overflow-hidden mt-1 opacity-50 custom-scrollbar">
-                                     {ioLogs.slice(-5).map((log, i) => <div key={i}>{">"} {log}</div>)}
-                                </div>
-                            </div>
-                        </div>
+                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} />
                     </div>
                 </div>
             </div>
