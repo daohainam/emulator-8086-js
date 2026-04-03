@@ -5,36 +5,29 @@ const DOS_COLORS = [
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
-const DEFAULT_CODE = `; --- DEMO: HELLO 8086 ĐA SẮC ---
+const DEFAULT_CODE = `; --- DEMO: KIỂM TRA LỆNH MỚI ---
 MOV AX, 0x1000
 MOV DS, AX
 
-; Lưu chuỗi và màu sắc vào RAM (Data Segment)
-; Cấu trúc mỗi Word: [Thuộc tính màu 8-bit][Mã ASCII 8-bit]
-MOV WORD [0], 0x0C48 ; 'H' (Màu Đỏ sáng)
-MOV WORD [2], 0x0E65 ; 'e' (Màu Vàng)
-MOV WORD [4], 0x0A6C ; 'l' (Màu Xanh lá)
-MOV WORD [6], 0x0B6C ; 'l' (Màu Xanh ngọc)
-MOV WORD [8], 0x096F ; 'o' (Màu Xanh dương)
-MOV WORD [10], 0x0020 ; ' ' (Khoảng trắng)
-MOV WORD [12], 0x0D38 ; '8' (Màu Hồng)
-MOV WORD [14], 0x0C30 ; '0' (Màu Đỏ sáng)
-MOV WORD [16], 0x0E38 ; '8' (Màu Vàng)
-MOV WORD [18], 0x0A36 ; '6' (Màu Xanh lá)
+; Test Parity Flag (PF) và Jump Parity (JP/JNP)
+MOV AL, 3      ; 3 = 00000011 (2 bit 1 -> Parity Even)
+OR AL, 0       ; Cập nhật cờ
+JPE PARITY_EVEN
 
+JMP END_TEST
+
+PARITY_EVEN:
 MOV AX, 0xB800
-MOV ES, AX         ; ES trỏ tới Video RAM
-MOV SI, 0          ; SI trỏ tới dữ liệu nguồn trong RAM
-MOV DI, 1990       ; DI trỏ tới giữa màn hình (Hàng 12, Cột 35)
-MOV CX, 10         ; Lặp 10 lần (10 ký tự)
+MOV ES, AX
+MOV WORD [ES:0], 0x0A50 ; In chữ 'P' màu xanh lá báo hiệu Parity Even hoạt động
+; Test LOOPZ
+MOV CX, 5
+MOV AX, 0
+TEST_LOOP:
+ADD AX, 0      ; ZF = 1
+LOOPZ TEST_LOOP
 
-PRINT_LOOP:
-MOV AX, [SI]       ; Đọc 1 Ký tự & Màu từ RAM
-MOV [ES:DI], AX    ; Ghi trực tiếp ra màn hình VGA
-ADD SI, 2          ; Tiến tới ký tự tiếp theo trong RAM
-ADD DI, 2          ; Tiến tới ô màn hình tiếp theo
-LOOP PRINT_LOOP
-
+END_TEST:
 HLT`;
 
 export default function Emulator8086() {
@@ -44,7 +37,7 @@ export default function Emulator8086() {
     const [isAssembled, setIsAssembled] = useState(false);
     const [memSegStr, setMemSegStr] = useState("0x0000");
     const [memOffStr, setMemOffStr] = useState("0x0000");
-    const [orgOffset, setOrgOffset] = useState("0x0000"); // State cho Origin Offset
+    const [orgOffset, setOrgOffset] = useState("0x0000");
     const [ioLogs, setIoLogs] = useState([]);
     
     const [, setTick] = useState(0);
@@ -57,7 +50,7 @@ export default function Emulator8086() {
 
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: 0xFFFE, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
-        flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0 },
+        flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
         mem: new Uint8Array(1048576),
         disk: new Uint8Array(65536),
         ioPorts: {},
@@ -68,7 +61,7 @@ export default function Emulator8086() {
         t2High: false,
         freq: 0,
         beeping: false,
-        bootMode: false // Phân biệt chạy mã assembly high-level và chạy opcode raw (Boot)
+        bootMode: false
     });
 
     const addLog = (msg) => {
@@ -79,6 +72,12 @@ export default function Emulator8086() {
     
     const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & 0xFFFFF;
 
+    const calcParity = (val) => {
+        let p = 0, v = val & 0xFF;
+        while (v) { p ^= (v & 1); v >>= 1; }
+        return (p === 0) ? 1 : 0;
+    };
+
     const handleRegChange = (reg, valStr) => {
         let val = parseInt(valStr.replace(/0x/i, ''), 16);
         if (isNaN(val)) val = 0;
@@ -87,23 +86,18 @@ export default function Emulator8086() {
     };
 
     const handleReset = () => {
-        // Dừng chương trình nếu đang chạy
         setIsRunning(false);
         isRunningRef.current = false;
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
         
         const e = eng.current;
-        // Đặt lại các thanh ghi về 0
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = 0xFFFE;
         
-        // Đặt lại IP về ORG
         const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.reg.IP = startIP;
         
-        // Đặt lại cờ hiệu
-        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0 };
-        
+        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         setErrorMessage(null);
         forceRender();
     };
@@ -112,7 +106,7 @@ export default function Emulator8086() {
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = 0xFFFE;
-        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0 };
+        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         e.mem.fill(0);
         e.ioPorts = {};
         e.t2Div = 0;
@@ -241,6 +235,7 @@ export default function Emulator8086() {
         const f = eng.current.flags;
         let r = 0;
         if (f.CF) r |= (1 << 0);
+        if (f.PF) r |= (1 << 2);
         if (f.AF) r |= (1 << 4);
         if (f.ZF) r |= (1 << 6);
         if (f.SF) r |= (1 << 7);
@@ -253,6 +248,7 @@ export default function Emulator8086() {
     const unpackFlags = (r) => {
         const f = eng.current.flags;
         f.CF = (r & (1 << 0)) ? 1 : 0;
+        f.PF = (r & (1 << 2)) ? 1 : 0;
         f.AF = (r & (1 << 4)) ? 1 : 0;
         f.ZF = (r & (1 << 6)) ? 1 : 0;
         f.SF = (r & (1 << 7)) ? 1 : 0;
@@ -279,7 +275,6 @@ export default function Emulator8086() {
         const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.reg.IP = startIP;
         
-        // Tạo mảng trống (padding NOP) cho đến startIP để khớp index
         e.insts = new Array(startIP).fill({ op: "NOP", args: [], originalLine: 0 });
         e.labels = {};
         
@@ -308,138 +303,278 @@ export default function Emulator8086() {
         const r = e.reg;
         const f = e.flags;
 
-        // Boot Mode execution (raw opcodes from RAM)
         if (e.bootMode) {
             const opCode = e.mem[r.IP];
-            if (opCode === 0xB4) { 
-                r.AX = (r.AX & 0x00FF) | (e.mem[r.IP + 1] << 8); 
-                r.IP += 2; 
-            }
-            else if (opCode === 0xB0) { 
-                r.AX = (r.AX & 0xFF00) | e.mem[r.IP + 1]; 
-                r.IP += 2; 
-            }
+            if (opCode === 0xB4) { r.AX = (r.AX & 0x00FF) | (e.mem[r.IP + 1] << 8); r.IP += 2; }
+            else if (opCode === 0xB0) { r.AX = (r.AX & 0xFF00) | e.mem[r.IP + 1]; r.IP += 2; }
             else if (opCode === 0xCD) {
-                if (e.mem[r.IP + 1] === 0x10 && ((r.AX >> 8) & 0xFF) === 0x0E) {
-                    writeToVGA(String.fromCharCode(r.AX & 0xFF));
-                }
+                if (e.mem[r.IP + 1] === 0x10 && ((r.AX >> 8) & 0xFF) === 0x0E) writeToVGA(String.fromCharCode(r.AX & 0xFF));
                 r.IP += 2;
             }
-            else if (opCode === 0xF4) { 
-                return false; 
-            }
-            else { 
-                throw new Error(`Opcode error 0x${opCode.toString(16).toUpperCase()} at 0x${r.IP.toString(16).toUpperCase()}`); 
-            }
+            else if (opCode === 0xF4) { return false; }
+            else { throw new Error(`Opcode error 0x${opCode.toString(16).toUpperCase()} at 0x${r.IP.toString(16).toUpperCase()}`); }
             return true;
         }
 
         if (r.IP >= e.insts.length) return false;
         const inst = e.insts[r.IP];
         
-        // Skip padding NOPs generated by ORG offset
         if (inst && inst.op === "NOP" && inst.originalLine === 0) {
-            r.IP++;
-            return true;
+            r.IP++; return true;
         }
 
         let nextIP = r.IP + 1;
-
         let op = inst.op;
         let args = inst.args;
+        let prefix = null;
+
+        if (["REP", "REPE", "REPZ", "REPNE", "REPNZ"].includes(op)) {
+            if (r.CX === 0) { r.IP = nextIP; return true; }
+            prefix = op;
+            op = args.length > 0 ? args[0].toUpperCase() : "NOP";
+            args = args.slice(1);
+        }
         
         switch (op) {
-            case "MOV": 
-                writeOpVal(args[0], getOpVal(args[1])); 
+            // Memory & Move
+            case "MOV": writeOpVal(args[0], getOpVal(args[1])); break;
+            case "XCHG": {
+                const t = getOpVal(args[0]); writeOpVal(args[0], getOpVal(args[1])); writeOpVal(args[1], t); break;
+            }
+            case "LEA": {
+                let inner = args[1].replace(/[\[\]]/g, '').trim();
+                if (inner.includes(':')) inner = inner.split(':')[1];
+                writeOpVal(args[0], resolveOffset(inner)); break;
+            }
+            case "LDS": case "LES": {
+                const addr = calcPhys(r.DS, resolveOffset(args[1].replace(/[\[\]]/g, '')));
+                writeOpVal(args[0], readMemWord(addr));
+                r[op === "LDS" ? "DS" : "ES"] = readMemWord(addr + 2);
                 break;
-            case "ADD": case "SUB": case "CMP": {
-                const v1 = getOpVal(args[0]);
-                const v2 = getOpVal(args[1]);
-                const res = op === "ADD" ? v1 + v2 : v1 - v2;
+            }
+            case "XLAT": r.AX = (r.AX & 0xFF00) | e.mem[calcPhys(r.DS, (r.BX + (r.AX & 0xFF)) & 0xFFFF)]; break;
+
+            // Arithmetic
+            case "ADD": case "SUB": case "CMP": case "ADC": case "SBB": {
+                const v1 = getOpVal(args[0]); const v2 = getOpVal(args[1]); let res = 0;
+                if (op === "ADD") { res = v1 + v2; f.CF = res > 0xFFFF ? 1 : 0; f.AF = ((v1 ^ v2 ^ res) & 0x10) ? 1 : 0; }
+                if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; f.AF = ((v1 ^ v2 ^ res) & 0x10) ? 1 : 0; }
+                if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > 0xFFFF ? 1 : 0; }
+                if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; }
                 if (op !== "CMP") writeOpVal(args[0], res);
-                f.ZF = (res & 0xFFFF) === 0 ? 1 : 0;
-                f.CF = op === "ADD" ? (res > 0xFFFF ? 1 : 0) : (v1 < v2 ? 1 : 0);
-                f.SF = (res & 0x8000) ? 1 : 0;
+                f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res);
                 break;
             }
+            case "MUL": case "IMUL": {
+                const u1 = r.AX & 0xFFFF; const u2 = getOpVal(args[0]) & 0xFFFF;
+                if (op === "MUL") {
+                    const ur = (u1 * u2) >>> 0; r.AX = ur & 0xFFFF; r.DX = (ur >>> 16) & 0xFFFF;
+                    f.CF = f.OF = r.DX !== 0 ? 1 : 0;
+                } else {
+                    const sr = ((u1 << 16) >> 16) * ((u2 << 16) >> 16);
+                    r.AX = sr & 0xFFFF; r.DX = (sr >> 16) & 0xFFFF;
+                    f.CF = f.OF = ((r.AX & 0x8000) ? r.DX === 0xFFFF : r.DX === 0) ? 0 : 1;
+                }
+                break;
+            }
+            case "DIV": case "IDIV": {
+                const d = getOpVal(args[0]) & 0xFFFF; if (d === 0) throw new Error("Divide by zero");
+                if (op === "DIV") {
+                    const dvnd = ((r.DX & 0xFFFF) * 0x10000) + (r.AX & 0xFFFF);
+                    const q = Math.floor(dvnd / d); if (q > 0xFFFF) throw new Error("Divide overflow");
+                    r.AX = q & 0xFFFF; r.DX = (dvnd % d) & 0xFFFF;
+                } else {
+                    const dvnd = (r.DX << 16) | (r.AX & 0xFFFF); const ds = (d << 16) >> 16;
+                    const q = Math.trunc(dvnd / ds);
+                    if (q > 32767 || q < -32768) throw new Error("Divide overflow");
+                    r.AX = q & 0xFFFF; r.DX = (dvnd % ds) & 0xFFFF;
+                }
+                break;
+            }
+            case "INC": case "DEC": {
+                const v = op === "INC" ? getOpVal(args[0]) + 1 : getOpVal(args[0]) - 1;
+                writeOpVal(args[0], v);
+                f.ZF = (v & 0xFFFF) === 0 ? 1 : 0; f.SF = (v & 0x8000) ? 1 : 0; f.PF = calcParity(v);
+                break;
+            }
+            case "NEG": {
+                const v = getOpVal(args[0]); const nr = (0 - v) & 0xFFFF;
+                writeOpVal(args[0], nr); f.CF = v === 0 ? 0 : 1; f.ZF = nr === 0 ? 1 : 0; f.SF = (nr & 0x8000) ? 1 : 0; f.PF = calcParity(nr); break;
+            }
+
+            // Bitwise & Logic
             case "AND": case "OR": case "XOR": {
-                const l1 = getOpVal(args[0]); const l2 = getOpVal(args[1]);
-                let lr = 0;
+                const l1 = getOpVal(args[0]); const l2 = getOpVal(args[1]); let lr = 0;
                 if (op === "AND") lr = l1 & l2; else if (op === "OR") lr = l1 | l2; else lr = l1 ^ l2;
-                writeOpVal(args[0], lr); f.CF = 0; f.OF = 0; f.ZF = (lr & 0xFFFF) === 0 ? 1 : 0; f.SF = (lr & 0x8000) ? 1 : 0;
+                writeOpVal(args[0], lr); f.CF = 0; f.OF = 0; f.ZF = (lr & 0xFFFF) === 0 ? 1 : 0; f.SF = (lr & 0x8000) ? 1 : 0; f.PF = calcParity(lr); break;
+            }
+            case "TEST": {
+                const res = getOpVal(args[0]) & getOpVal(args[1]);
+                f.CF = 0; f.OF = 0; f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res); break;
+            }
+            case "NOT": writeOpVal(args[0], ~getOpVal(args[0]) & 0xFFFF); break;
+            
+            // Shifts & Rotates
+            case "SHL": case "SAL": case "SHR": case "SAR": case "ROL": case "ROR": case "RCL": case "RCR": {
+                let sv = getOpVal(args[0]); const sc = getOpVal(args[1]) & 0x1F;
+                for (let i = 0; i < sc; i++) {
+                    if (op === "SHL" || op === "SAL") { f.CF = (sv & 0x8000) ? 1 : 0; sv = (sv << 1) & 0xFFFF; }
+                    else if (op === "SHR") { f.CF = sv & 1; sv = (sv >> 1) & 0xFFFF; }
+                    else if (op === "SAR") { f.CF = sv & 1; sv = (sv & 0x8000) | ((sv >> 1) & 0x7FFF); }
+                    else if (op === "ROL") { f.CF = (sv & 0x8000) ? 1 : 0; sv = ((sv << 1) | f.CF) & 0xFFFF; }
+                    else if (op === "ROR") { f.CF = sv & 1; sv = ((sv >> 1) | (f.CF << 15)) & 0xFFFF; }
+                    else if (op === "RCL") { let oc = f.CF; f.CF = (sv & 0x8000) ? 1 : 0; sv = ((sv << 1) | oc) & 0xFFFF; }
+                    else if (op === "RCR") { let oc = f.CF; f.CF = sv & 1; sv = ((sv >> 1) | (oc << 15)) & 0xFFFF; }
+                }
+                writeOpVal(args[0], sv); f.ZF = sv === 0 ? 1 : 0; f.SF = (sv & 0x8000) ? 1 : 0; f.PF = calcParity(sv); break;
+            }
+
+            // String OPs (Bao gồm các Alias)
+            case "MOVSB": case "MOVSW": case "MOVS":
+            case "LODSB": case "LODSW": case "LODS":
+            case "STOSB": case "STOSW": case "STOS":
+            case "CMPSB": case "CMPSW": case "CMPS":
+            case "SCASB": case "SCASW": case "SCAS": {
+                const sz = (op.endsWith("W") || args.includes("WORD")) ? 2 : 1; 
+                const dir = f.DF === 0 ? sz : -sz;
+                
+                if (op.startsWith("MOVS")) {
+                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
+                    if (sz === 1) e.mem[d] = e.mem[s]; else writeMemWord(d, readMemWord(s));
+                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("LODS")) {
+                    const s = calcPhys(r.DS, r.SI);
+                    if (sz === 1) r.AX = (r.AX & 0xFF00) | e.mem[s]; else r.AX = readMemWord(s);
+                    r.SI = (r.SI + dir) & 0xFFFF;
+                } else if (op.startsWith("STOS")) {
+                    const d = calcPhys(r.ES, r.DI);
+                    if (sz === 1) e.mem[d] = r.AX & 0xFF; else writeMemWord(d, r.AX);
+                    r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("CMPS")) {
+                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
+                    const v1 = sz === 1 ? e.mem[s] : readMemWord(s); const v2 = sz === 1 ? e.mem[d] : readMemWord(d);
+                    const res = v1 - v2; f.ZF = (res & (sz===1?0xFF:0xFFFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
+                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("SCAS")) {
+                    const d = calcPhys(r.ES, r.DI);
+                    const v1 = sz === 1 ? r.AX & 0xFF : r.AX; const v2 = sz === 1 ? e.mem[d] : readMemWord(d);
+                    const res = v1 - v2; f.ZF = (res & (sz===1?0xFF:0xFFFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
+                    r.DI = (r.DI + dir) & 0xFFFF;
+                }
                 break;
             }
+
+            // BCD & ASCII Adjusts
+            case "AAA": if ((r.AX & 0x0F) > 9 || f.AF === 1) { r.AX = (r.AX + 6) & 0xFFFF; r.AX = (((r.AX >> 8) + 1) << 8) | (r.AX & 0xFF); f.AF = 1; f.CF = 1; } else { f.AF = 0; f.CF = 0; } r.AX &= 0xFF0F; break;
+            case "AAS": if ((r.AX & 0x0F) > 9 || f.AF === 1) { r.AX = (r.AX - 6) & 0xFFFF; r.AX = (((r.AX >> 8) - 1) << 8) | (r.AX & 0xFF); f.AF = 1; f.CF = 1; } else { f.AF = 0; f.CF = 0; } r.AX &= 0xFF0F; break;
+            case "AAM": { const al = r.AX & 0xFF; r.AX = (Math.floor(al / 10) << 8) | (al % 10); break; }
+            case "AAD": r.AX = (((r.AX >> 8) & 0xFF) * 10 + (r.AX & 0xFF)) & 0xFF; break;
+            case "DAA": { let al = r.AX & 0xFF; let oldCf = f.CF; if ((al & 0x0F) > 9 || f.AF === 1) { al += 6; f.CF = oldCf | (al > 0xFF ? 1 : 0); f.AF = 1; } else f.AF = 0; if (al > 0x9F || oldCf === 1) { al += 0x60; f.CF = 1; } else f.CF = 0; r.AX = (r.AX & 0xFF00) | (al & 0xFF); break; }
+            case "DAS": { let al = r.AX & 0xFF; let oldCf = f.CF; if ((al & 0x0F) > 9 || f.AF === 1) { al -= 6; f.CF = oldCf | (al < 0 ? 1 : 0); f.AF = 1; } else f.AF = 0; if (al > 0x9F || oldCf === 1) { al -= 0x60; f.CF = 1; } r.AX = (r.AX & 0xFF00) | (al & 0xFF); break; }
+            case "CBW": r.AX = (r.AX & 0x80) ? (0xFF00 | (r.AX & 0xFF)) : (r.AX & 0xFF); break;
+            case "CWD": r.DX = (r.AX & 0x8000) ? 0xFFFF : 0x0000; break;
+
+            // HW I/O
             case "OUT": {
-                const port = getOpVal(args[0]);
-                const val = getOpVal(args[1]) & 0xFF;
+                const port = getOpVal(args[0]); const val = getOpVal(args[1]) & 0xFF;
                 if (port === 0x70) e.diskSectorSelect = val % 256;
                 if (port === 0x71) {
-                    const rAddr = calcPhys(r.DS, r.BX);
-                    const dAddr = e.diskSectorSelect * 16;
-                    if (val === 1) {
-                        for(let i=0; i<16; i++) e.mem[rAddr + i] = e.disk[dAddr + i];
-                    }
-                    if (val === 2) {
-                        for(let i=0; i<16; i++) e.disk[dAddr + i] = e.mem[rAddr + i];
-                    }
+                    const rAddr = calcPhys(r.DS, r.BX); const dAddr = e.diskSectorSelect * 16;
+                    if (val === 1) for(let i=0; i<16; i++) e.mem[rAddr + i] = e.disk[dAddr + i];
+                    if (val === 2) for(let i=0; i<16; i++) e.disk[dAddr + i] = e.mem[rAddr + i];
                 }
                 if (port === 0x42) {
                     if (!e.t2High) { e.t2Div = val; e.t2High = true; }
-                    else { 
-                        e.t2Div |= (val << 8); 
-                        e.t2High = false; 
-                        if (e.t2Div > 0) e.freq = 1193182 / e.t2Div; 
-                    }
+                    else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = 1193182 / e.t2Div; }
                 }
                 if (port === 0x61) {
                     const enable = (val & 0x03) === 0x03;
-                    if (enable && !e.beeping) { 
-                        e.beeping = true; 
-                        playBeep(e.freq); 
-                    } else if (!enable && e.beeping) { 
-                        e.beeping = false; 
-                        stopAudio(); 
-                    }
+                    if (enable && !e.beeping) { e.beeping = true; playBeep(e.freq); } else if (!enable && e.beeping) { e.beeping = false; stopAudio(); }
                 }
                 addLog(`OUT 0x${port.toString(16).toUpperCase()}: 0x${val.toString(16).toUpperCase()}`);
                 break;
             }
-            case "IN": 
-                writeOpVal(args[0], e.ioPorts[getOpVal(args[1])] || 0); 
-                break;
-            case "INC": case "DEC": 
-                writeOpVal(args[0], op === "INC" ? getOpVal(args[0]) + 1 : getOpVal(args[0]) - 1); 
-                break;
-            case "LOOP": 
-                r.CX = (r.CX - 1) & 0xFFFF; 
-                if (r.CX > 0) nextIP = e.labels[args[0].toUpperCase()]; 
-                break;
-            case "JZ": case "JE": 
-                if (f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; 
-                break;
-            case "JNZ": case "JNE": 
-                if (f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; 
-                break;
+            case "IN": writeOpVal(args[0], e.ioPorts[getOpVal(args[1])] || 0); break;
+            
+            // Jumps & Loops
+            case "LOOP": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "LOOPE": case "LOOPZ": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0 && f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "LOOPNE": case "LOOPNZ": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0 && f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            
+            case "JZ": case "JE": if (f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JNZ": case "JNE": if (f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JA": case "JNBE": if (f.CF === 0 && f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JAE": case "JNB": case "JNC": if (f.CF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JB": case "JNAE": case "JC": if (f.CF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JBE": case "JNA": if (f.CF === 1 || f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JG": case "JNLE": if (f.ZF === 0 && f.SF === f.OF) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JGE": case "JNL": if (f.SF === f.OF) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JL": case "JNGE": if (f.SF !== f.OF) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JLE": case "JNG": if (f.ZF === 1 || f.SF !== f.OF) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JP": case "JPE": if (f.PF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JNP": case "JPO": if (f.PF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JCXZ": if (r.CX === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JO": if (f.OF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JNO": if (f.OF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JS": if (f.SF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "JNS": if (f.SF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            
             case "JMP": nextIP = e.labels[args[0].toUpperCase()]; break;
             case "CALL": push16(nextIP); nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "RET": nextIP = pop16(); break;
+            case "RET": 
+                nextIP = pop16(); 
+                if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; 
+                break;
+            case "RETF": 
+                nextIP = pop16(); r.CS = pop16(); 
+                if (args.length > 0) r.SP = (r.SP + getOpVal(args[0])) & 0xFFFF; 
+                break;
+
+            // Stack, Interrupts & Flags
             case "PUSH": push16(getOpVal(args[0])); break;
             case "POP": writeOpVal(args[0], pop16()); break;
+            case "PUSHA": 
+                // Mô phỏng lệnh PUSHA mở rộng (dành cho 80186 trở lên nhưng rất hay dùng)
+                { const sp = r.SP; push16(r.AX); push16(r.CX); push16(r.DX); push16(r.BX); push16(sp); push16(r.BP); push16(r.SI); push16(r.DI); break; }
+            case "POPA": 
+                r.DI = pop16(); r.SI = pop16(); r.BP = pop16(); pop16(); r.BX = pop16(); r.DX = pop16(); r.CX = pop16(); r.AX = pop16(); break;
+            
             case "PUSHF": push16(packFlags()); break;
             case "POPF": unpackFlags(pop16()); break;
+            case "LAHF": r.AX = (r.AX & 0xFF00) | (packFlags() & 0xFF); break;
+            case "SAHF": unpackFlags((packFlags() & 0xFF00) | (r.AX & 0xFF)); break;
+            case "STC": f.CF = 1; break; case "CLC": f.CF = 0; break; case "CMC": f.CF = 1 - f.CF; break;
+            case "STD": f.DF = 1; break; case "CLD": f.DF = 0; break;
+            case "STI": f.IF = 1; break; case "CLI": f.IF = 0; break;
             case "INT": {
                 const vec = getOpVal(args[0]);
                 push16(packFlags()); push16(r.CS); push16(nextIP);
                 nextIP = readMemWord(vec * 4); r.CS = readMemWord(vec * 4 + 2);
                 break;
             }
-            case "IRET": nextIP = pop16(); r.CS = pop16(); unpackFlags(pop16()); break;
-            case "HLT": 
-                return false;
-            default:
+            case "INTO": {
+                if (f.OF === 1) {
+                    push16(packFlags()); push16(r.CS); push16(nextIP);
+                    nextIP = readMemWord(4 * 4); r.CS = readMemWord(4 * 4 + 2); // INT 4
+                }
                 break;
+            }
+            case "IRET": nextIP = pop16(); r.CS = pop16(); unpackFlags(pop16()); break;
+            
+            case "WAIT": case "LOCK": case "ESC": case "NOP": break;
+            case "HLT": return false;
+            default: break;
         }
         
+        // Hoàn tất xử lý Repeat prefix
+        if (prefix) {
+            r.CX = (r.CX - 1) & 0xFFFF;
+            let repeat = r.CX !== 0;
+            if (prefix === "REPE" || prefix === "REPZ") repeat = repeat && f.ZF === 1;
+            if (prefix === "REPNE" || prefix === "REPNZ") repeat = repeat && f.ZF === 0;
+            if (repeat) nextIP = r.IP; // Quay lại lệnh hiện tại
+        }
+
         r.IP = nextIP;
         return true;
     };
@@ -665,6 +800,7 @@ export default function Emulator8086() {
                                 <span>ZF: {e.flags.ZF}</span><span>CF: {e.flags.CF}</span>
                                 <span>SF: {e.flags.SF}</span><span>OF: {e.flags.OF}</span>
                                 <span>DF: {e.flags.DF}</span><span>IF: {e.flags.IF}</span>
+                                <span>PF: {e.flags.PF}</span><span>AF: {e.flags.AF}</span>
                             </div>
                             
                             <div className="mt-2 text-[11px] font-mono text-center text-fuchsia-400 bg-slate-950/80 py-1 rounded border border-slate-800">
