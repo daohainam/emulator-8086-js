@@ -7,5 +7,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: '/', 
+  base: '/emulator-8086-js/', 
 })
