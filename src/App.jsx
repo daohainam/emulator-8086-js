@@ -79,14 +79,20 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
     );
 }
 
-function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset }) {
+function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory }) {
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
             <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
                 <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
-                <div className="flex items-center space-x-2 text-[10px]">
-                    <span className="text-slate-500">ORG (Origin):</span>
-                    <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
+                <div className="flex items-center space-x-4 text-[10px]">
+                    <label className="flex items-center space-x-1 text-slate-400 cursor-pointer hover:text-slate-200">
+                        <input type="checkbox" checked={keepMemory} onChange={e => setKeepMemory(e.target.checked)} className="cursor-pointer" />
+                        <span>Keep RAM</span>
+                    </label>
+                    <div className="flex items-center space-x-2">
+                        <span className="text-slate-500">ORG (Origin):</span>
+                        <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
+                    </div>
                 </div>
             </div>
             <textarea value={code} onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} className="flex-1 bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-relaxed custom-scrollbar" spellCheck="false" />
@@ -151,7 +157,7 @@ function DiskViewer({ diskMemory }) {
     );
 }
 
-function MemoryViewer({ memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr }) {
+function MemoryViewer({ title = "Memory View", memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr, hasToggle = false, isToggled = false, onToggle, onMemoryChange, isRunning }) {
     const seg = parseInt(memSegStr.replace(/0x/i, ''), 16) || 0;
     const off = parseInt(memOffStr.replace(/0x/i, ''), 16) || 0;
 
@@ -167,22 +173,30 @@ function MemoryViewer({ memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr
             if (addr < 1048576) {
                 const val = memory[addr];
                 bytes.push(
-                    <span key={c} className={val !== 0 ? "text-amber-400" : "text-slate-600"}>
-                        {val.toString(16).padStart(2, '0').toUpperCase()}
-                    </span>
+                    <input
+                        key={`${addr}-${val}`}
+                        type="text"
+                        maxLength={2}
+                        defaultValue={val.toString(16).padStart(2, '0').toUpperCase()}
+                        onBlur={(e) => onMemoryChange && onMemoryChange(addr, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                        onFocus={(e) => e.target.select()}
+                        disabled={isRunning}
+                        className={`w-[2ch] p-0 m-0 border-none bg-transparent text-center outline-none focus:bg-slate-700 focus:text-white rounded-sm cursor-text disabled:cursor-default ${val !== 0 ? "text-amber-400" : "text-slate-600"}`}
+                    />
                 );
                 chars.push((val >= 32 && val <= 126) ? String.fromCharCode(val) : '.');
             } else {
-                bytes.push(<span key={c} className="text-slate-800">00</span>);
+                bytes.push(<span key={c} className="text-slate-800 w-[2ch] inline-block text-center">00</span>);
                 chars.push('.');
             }
         }
         
         rows.push(
             <div key={r} className="flex space-x-3 items-center whitespace-nowrap">
-                <span className="text-blue-400 w-16 select-none">{toHex(seg)}:{toHex(rowOff)}</span>
+                <span className="text-blue-400 w-[14ch] shrink-0 select-none">{toHex(seg)}:{toHex(rowOff)}</span>
                 <span className="flex-1 flex justify-between tracking-widest">{bytes}</span>
-                <span className="text-emerald-500 w-16 text-right whitespace-pre">{chars.join('')}</span>
+                <span className="text-emerald-500 w-[16ch] shrink-0 text-right whitespace-pre">{chars.join('')}</span>
             </div>
         );
     }
@@ -190,7 +204,15 @@ function MemoryViewer({ memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-[230px]">
             <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                <h2 className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest font-mono">Memory View</h2>
+                <div className="flex items-center space-x-3">
+                    <h2 className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest font-mono">{title}</h2>
+                    {hasToggle && (
+                        <label className="flex items-center space-x-1 text-[9px] text-slate-400 cursor-pointer hover:text-slate-200">
+                            <input type="checkbox" checked={isToggled} onChange={e => onToggle(e.target.checked)} className="cursor-pointer" />
+                            <span>View 2</span>
+                        </label>
+                    )}
+                </div>
                 <div className="flex space-x-3 text-[10px] items-center">
                     <div className="flex items-center space-x-1">
                         <span className="text-slate-500">SEG:</span>
@@ -270,11 +292,15 @@ export default function Emulator8086() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
+    const [keepMemory, setKeepMemory] = useState(false);
     
     // States cho Origin Offset và Memory Viewer
     const [orgOffset, setOrgOffset] = useState("0x1000"); 
     const [memSegStr, setMemSegStr] = useState("0x1000"); 
     const [memOffStr, setMemOffStr] = useState("0x0000");
+    const [showMem2, setShowMem2] = useState(false);
+    const [mem2SegStr, setMem2SegStr] = useState("0xB800"); 
+    const [mem2OffStr, setMem2OffStr] = useState("0x0000");
     
     const [ioLogs, setIoLogs] = useState([]);
     const [, setTick] = useState(0);
@@ -310,6 +336,13 @@ export default function Emulator8086() {
         forceRender();
     };
 
+    const handleMemoryChange = (addr, valStr) => {
+        let val = parseInt(valStr, 16);
+        if (isNaN(val)) val = 0;
+        eng.current.mem[addr] = val & 0xFF;
+        forceRender();
+    };
+
     const handleReset = () => {
         setIsRunning(false);
         isRunningRef.current = false;
@@ -319,7 +352,7 @@ export default function Emulator8086() {
         e.reg.SP = 0xFFFE;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        e.mem.fill(0); 
+        if (!keepMemory) e.mem.fill(0); 
         setErrorMessage(null);
         forceRender();
     };
@@ -329,7 +362,7 @@ export default function Emulator8086() {
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = 0xFFFE;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        e.mem.fill(0);
+        if (!keepMemory) e.mem.fill(0);
         e.ioPorts = {};
         e.t2Div = 0;
         e.t2High = false;
@@ -746,12 +779,28 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} />
+                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
                         <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} />
-                        <MemoryViewer memory={e.mem} memSegStr={memSegStr} setMemSegStr={setMemSegStr} memOffStr={memOffStr} setMemOffStr={setMemOffStr} />
+                        <MemoryViewer 
+                            title="Memory View 1" 
+                            memory={e.mem} 
+                            memSegStr={memSegStr} setMemSegStr={setMemSegStr} 
+                            memOffStr={memOffStr} setMemOffStr={setMemOffStr} 
+                            hasToggle={true} isToggled={showMem2} onToggle={setShowMem2}
+                            onMemoryChange={handleMemoryChange} isRunning={isRunning}
+                        />
+                        {showMem2 && (
+                            <MemoryViewer 
+                                title="Memory View 2" 
+                                memory={e.mem} 
+                                memSegStr={mem2SegStr} setMemSegStr={setMem2SegStr} 
+                                memOffStr={mem2OffStr} setMemOffStr={setMem2OffStr} 
+                                onMemoryChange={handleMemoryChange} isRunning={isRunning}
+                            />
+                        )}
                         <DiskViewer diskMemory={e.disk} />
                     </div>
 
