@@ -1,11 +1,9 @@
-name: Deploy React to GitHub Pages
+name: Deploy to GitHub Pages
 
-# Kích hoạt quá trình deploy mỗi khi có code đẩy lên nhánh 'main'
 on:
   push:
     branches: ["main"]
 
-# Cấp quyền ghi cho workflow để nó có thể đưa trang web lên mạng
 permissions:
   contents: read
   pages: write
@@ -42,7 +40,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist' # Thư mục chứa code đã build của Vite
+          path: './dist'
 
       - name: Deploy to GitHub Pages
         id: deployment

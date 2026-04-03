@@ -8,34 +8,34 @@ const DOS_COLORS = [
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
-const DEFAULT_CODE = `; --- DEMO: HELLO 8086 ĐA SẮC ---
+const DEFAULT_CODE = `; --- DEMO: MULTICOLOR HELLO 8086 ---
 MOV AX, 0x1000
 MOV DS, AX
 
-; Lưu chuỗi và màu sắc vào RAM (Data Segment)
-; Cấu trúc mỗi Word: [Thuộc tính màu 8-bit][Mã ASCII 8-bit]
-MOV WORD [0], 0x0C48 ; 'H' (Màu Đỏ sáng)
-MOV WORD [2], 0x0E65 ; 'e' (Màu Vàng)
-MOV WORD [4], 0x0A6C ; 'l' (Màu Xanh lá)
-MOV WORD [6], 0x0B6C ; 'l' (Màu Xanh ngọc)
-MOV WORD [8], 0x096F ; 'o' (Màu Xanh dương)
-MOV WORD [10], 0x0020 ; ' ' (Khoảng trắng)
-MOV WORD [12], 0x0D38 ; '8' (Màu Hồng)
-MOV WORD [14], 0x0C30 ; '0' (Màu Đỏ sáng)
-MOV WORD [16], 0x0E38 ; '8' (Màu Vàng)
-MOV WORD [18], 0x0A36 ; '6' (Màu Xanh lá)
+; Store string and colors in RAM (Data Segment)
+; Word structure: [8-bit Color Attribute][8-bit ASCII Code]
+MOV WORD [0], 0x0C48 ; 'H' (Light Red)
+MOV WORD [2], 0x0E65 ; 'e' (Yellow)
+MOV WORD [4], 0x0A6C ; 'l' (Light Green)
+MOV WORD [6], 0x0B6C ; 'l' (Light Cyan)
+MOV WORD [8], 0x096F ; 'o' (Light Blue)
+MOV WORD [10], 0x0020 ; ' ' (Space)
+MOV WORD [12], 0x0D38 ; '8' (Light Magenta)
+MOV WORD [14], 0x0C30 ; '0' (Light Red)
+MOV WORD [16], 0x0E38 ; '8' (Yellow)
+MOV WORD [18], 0x0A36 ; '6' (Light Green)
 
 MOV AX, 0xB800
-MOV ES, AX         ; ES trỏ tới Video RAM
-MOV SI, 0          ; SI trỏ tới dữ liệu nguồn trong RAM
-MOV DI, 1990       ; DI trỏ tới giữa màn hình (Hàng 12, Cột 35)
-MOV CX, 10         ; Lặp 10 lần (10 ký tự)
+MOV ES, AX         ; ES points to Video RAM
+MOV SI, 0          ; SI points to source data in RAM
+MOV DI, 1990       ; DI points to center of screen (Row 12, Column 35)
+MOV CX, 10         ; Loop 10 times (10 characters)
 
 PRINT_LOOP:
-MOV AX, [SI]       ; Đọc 1 Ký tự & Màu từ RAM
-MOV [ES:DI], AX    ; Ghi trực tiếp ra màn hình VGA
-ADD SI, 2          ; Tiến tới ký tự tiếp theo trong RAM
-ADD DI, 2          ; Tiến tới ô màn hình tiếp theo
+MOV AX, [SI]       ; Read 1 Character & Color from RAM
+MOV [ES:DI], AX    ; Write directly to VGA screen
+ADD SI, 2          ; Move to next character in RAM
+ADD DI, 2          ; Move to next screen cell
 LOOP PRINT_LOOP
 
 HLT`;
@@ -68,12 +68,12 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
             <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center">
                 <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
-                <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Biên dịch</button>
+                <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Assemble</button>
                 <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">🔄 Reset</button>
                 <button onClick={toggleRun} disabled={!isAssembled} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${!isAssembled ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
-                    {isRunning ? "Dừng" : "Chạy"}
+                    {isRunning ? "Stop" : "Run"}
                 </button>
-                <button onClick={stepUI} disabled={isRunning || !isAssembled} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Từng bước</button>
+                <button onClick={stepUI} disabled={isRunning || !isAssembled} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Step</button>
             </div>
         </div>
     );
@@ -649,7 +649,7 @@ export default function Emulator8086() {
 
     const bootFromDisk = () => {
         const e = eng.current;
-        if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) { setErrorMessage("Không tìm thấy chữ ký Boot 0xAA55!"); return; }
+        if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
         resetCPU();
         for (let i = 0; i < 512; i++) e.mem[0x7C00 + i] = e.disk[i];
         e.reg.IP = 0x7C00; e.reg.CS = 0x0000; e.bootMode = true;
