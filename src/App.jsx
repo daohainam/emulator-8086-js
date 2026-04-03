@@ -212,7 +212,7 @@ export default function Emulator8086() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
-    const [orgOffset, setOrgOffset] = useState("0x0000");
+    const [orgOffset, setOrgOffset] = useState("0x1000"); // Đã cập nhật thành 0x1000
     const [ioLogs, setIoLogs] = useState([]);
     
     const [, setTick] = useState(0);
