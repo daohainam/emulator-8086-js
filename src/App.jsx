@@ -257,6 +257,7 @@ export default function Emulator8086() {
         e.reg.SP = 0xFFFE;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
+        e.mem.fill(0); // Đã thêm: Xóa toàn bộ RAM khi Reset
         setErrorMessage(null);
         forceRender();
     };
