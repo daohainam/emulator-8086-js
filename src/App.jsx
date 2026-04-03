@@ -532,7 +532,7 @@ export default function Emulator8086() {
                             <span className="font-bold text-white text-xl">OS</span>
                         </div>
                         <div>
-                            <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR PRO</h1>
+                            <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
                             <p className="text-[10px] text-slate-400 uppercase tracking-widest">Full ISA | VGA | Audio | 64KB Disk | Boot Support</p>
                         </div>
                     </div>
