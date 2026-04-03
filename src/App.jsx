@@ -79,10 +79,35 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
     );
 }
 
-function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory }) {
+function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory, activeLine }) {
+    const overlayRef = useRef(null);
+    const textareaRef = useRef(null);
+
+    const handleScroll = (e) => {
+        if (overlayRef.current) {
+            overlayRef.current.scrollTop = e.target.scrollTop;
+            overlayRef.current.scrollLeft = e.target.scrollLeft;
+        }
+    };
+
+    // Tự động cuộn khung textarea khi nhảy qua dòng mới bị khuất
+    useEffect(() => {
+        if (activeLine >= 0 && textareaRef.current && overlayRef.current) {
+            const textarea = textareaRef.current;
+            const lineHeight = 24; // Sử dụng chiều cao chính xác 24px thay vì số lẻ
+            const targetY = activeLine * lineHeight;
+            const containerHeight = textarea.clientHeight;
+            const currentScroll = textarea.scrollTop;
+            
+            if (targetY < currentScroll || targetY > currentScroll + containerHeight - lineHeight * 2) {
+                textarea.scrollTop = targetY - containerHeight / 2 + lineHeight;
+            }
+        }
+    }, [activeLine]);
+
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
-            <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+            <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center z-20 relative">
                 <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
                 <div className="flex items-center space-x-4 text-[10px]">
                     <label className="flex items-center space-x-1 text-slate-400 cursor-pointer hover:text-slate-200">
@@ -95,7 +120,25 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
                     </div>
                 </div>
             </div>
-            <textarea value={code} onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} className="flex-1 bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-relaxed custom-scrollbar" spellCheck="false" />
+            <div className="relative flex-1 bg-slate-950/30 overflow-hidden">
+                {/* Lớp Highlight nằm chìm ở dưới */}
+                <div ref={overlayRef} className="absolute inset-0 p-4 font-mono text-[13px] leading-[24px] whitespace-pre overflow-hidden pointer-events-none z-0">
+                    {code.split('\n').map((line, i) => (
+                        <div key={i} className={`h-[24px] w-fit min-w-full rounded-sm ${i === activeLine ? "bg-amber-500/30 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.4)]" : ""}`}>
+                            <span className="text-transparent">{line.replace(/\r/g, '') || '\u00A0'}</span>
+                        </div>
+                    ))}
+                </div>
+                {/* Textarea nhập liệu thật nằm trong suốt ở trên */}
+                <textarea 
+                    ref={textareaRef}
+                    value={code} 
+                    onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} 
+                    onScroll={handleScroll}
+                    className="absolute inset-0 w-full h-full bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-[24px] whitespace-pre custom-scrollbar z-10" 
+                    spellCheck="false" 
+                />
+            </div>
         </div>
     );
 }
@@ -760,6 +803,15 @@ export default function Emulator8086() {
 
     const e = eng.current;
     const hasBootSig = e.disk[510] === 0x55 && e.disk[511] === 0xAA;
+    
+    // Tính toán dòng đang chạy hiện tại để Highlight
+    let activeLine = -1;
+    if (isAssembled && !e.bootMode && e.reg.IP < e.insts.length) {
+        const inst = e.insts[e.reg.IP];
+        if (inst && inst.originalLine > 0) {
+            activeLine = inst.originalLine - 1; // Mảng tính từ 0, originalLine tính từ 1
+        }
+    }
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} tabIndex="0">
@@ -779,7 +831,7 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} />
+                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} activeLine={activeLine} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
