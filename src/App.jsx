@@ -81,7 +81,7 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
 
 function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset }) {
     return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px]">
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
             <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
                 <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
                 <div className="flex items-center space-x-2 text-[10px]">
@@ -129,9 +129,9 @@ function VGAMonitor({ memory, cs, ip }) {
 
 function DiskViewer({ diskMemory }) {
     return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-48">
+        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40">
             <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (Sector 0-31 = Boot)</h2>
+                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (Sector 0-31)</h2>
             </div>
             <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
                 {Array.from({ length: 32 }).map((_, i) => (
@@ -146,6 +146,64 @@ function DiskViewer({ diskMemory }) {
                         </div>
                     </div>
                 ))}
+            </div>
+        </div>
+    );
+}
+
+function MemoryViewer({ memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr }) {
+    const seg = parseInt(memSegStr.replace(/0x/i, ''), 16) || 0;
+    const off = parseInt(memOffStr.replace(/0x/i, ''), 16) || 0;
+
+    const rows = [];
+    for (let r = 0; r < 8; r++) { // Hiển thị 8 dòng (128 bytes)
+        const rowOff = (off + r * 16) & 0xFFFF;
+        const rowPhys = calcPhys(seg, rowOff);
+        const bytes = [];
+        const chars = [];
+        
+        for (let c = 0; c < 16; c++) {
+            const addr = rowPhys + c;
+            if (addr < 1048576) {
+                const val = memory[addr];
+                bytes.push(
+                    <span key={c} className={val !== 0 ? "text-amber-400" : "text-slate-600"}>
+                        {val.toString(16).padStart(2, '0').toUpperCase()}
+                    </span>
+                );
+                chars.push((val >= 32 && val <= 126) ? String.fromCharCode(val) : '.');
+            } else {
+                bytes.push(<span key={c} className="text-slate-800">00</span>);
+                chars.push('.');
+            }
+        }
+        
+        rows.push(
+            <div key={r} className="flex space-x-3 items-center whitespace-nowrap">
+                <span className="text-blue-400 w-16 select-none">{toHex(seg)}:{toHex(rowOff)}</span>
+                <span className="flex-1 flex justify-between tracking-widest">{bytes}</span>
+                <span className="text-emerald-500 w-16 text-right whitespace-pre">{chars.join('')}</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-[230px]">
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest font-mono">Memory View</h2>
+                <div className="flex space-x-3 text-[10px] items-center">
+                    <div className="flex items-center space-x-1">
+                        <span className="text-slate-500">SEG:</span>
+                        <input type="text" value={memSegStr} onChange={e => setMemSegStr(e.target.value)} className="w-12 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-blue-400 text-center font-bold focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div className="flex items-center space-x-1">
+                        <span className="text-slate-500">OFF:</span>
+                        <input type="text" value={memOffStr} onChange={e => setMemOffStr(e.target.value)} className="w-12 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
+                    </div>
+                </div>
+            </div>
+            <div className="p-3 font-mono text-[11px] bg-slate-950/50 flex flex-col space-y-1.5 overflow-x-auto custom-scrollbar">
+                {rows}
             </div>
         </div>
     );
@@ -212,9 +270,13 @@ export default function Emulator8086() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
-    const [orgOffset, setOrgOffset] = useState("0x1000"); // Đã cập nhật thành 0x1000
-    const [ioLogs, setIoLogs] = useState([]);
     
+    // States cho Origin Offset và Memory Viewer
+    const [orgOffset, setOrgOffset] = useState("0x1000"); 
+    const [memSegStr, setMemSegStr] = useState("0x1000"); 
+    const [memOffStr, setMemOffStr] = useState("0x0000");
+    
+    const [ioLogs, setIoLogs] = useState([]);
     const [, setTick] = useState(0);
     const forceRender = () => setTick(t => t + 1);
 
@@ -257,7 +319,7 @@ export default function Emulator8086() {
         e.reg.SP = 0xFFFE;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        e.mem.fill(0); // Đã thêm: Xóa toàn bộ RAM khi Reset
+        e.mem.fill(0); 
         setErrorMessage(null);
         forceRender();
     };
@@ -689,6 +751,7 @@ export default function Emulator8086() {
 
                     <div className="lg:col-span-6 space-y-4">
                         <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} />
+                        <MemoryViewer memory={e.mem} memSegStr={memSegStr} setMemSegStr={setMemSegStr} memOffStr={memOffStr} setMemOffStr={setMemOffStr} />
                         <DiskViewer diskMemory={e.disk} />
                     </div>
 
