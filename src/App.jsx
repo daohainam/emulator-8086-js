@@ -175,7 +175,7 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
     );
 }
 
-function VGAMonitor({ memory, cs, ip }) {
+function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
     if (!memory) return null; 
     
     return (
@@ -197,9 +197,12 @@ function VGAMonitor({ memory, cs, ip }) {
                             const fg = DOS_COLORS[attr & 0x0F];
                             const bg = DOS_COLORS[(attr >> 4) & 0x0F];
                             const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
+                            const isCursor = (x === cursorX && y === cursorY);
+                            
                             return (
-                                <span key={x} style={{ color: fg, backgroundColor: bg, width: '1ch', textAlign: 'center', display: 'inline-block' }}>
+                                <span key={x} style={{ color: fg, backgroundColor: bg, width: '1ch', textAlign: 'center', display: 'inline-block', position: 'relative' }}>
                                     {displayChar}
+                                    {isCursor && <span className="absolute left-0 bottom-[1px] w-full h-[2px] bg-slate-300 animate-cursor-blink z-10"></span>}
                                 </span>
                             );
                         })}
@@ -429,7 +432,9 @@ export default function Emulator8086() {
         t2Div: 0,
         t2High: false,
         freq: 0,
-        beeping: false
+        beeping: false,
+        cursorX: 0,
+        cursorY: 0
     });
 
     const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-20));
@@ -491,6 +496,8 @@ export default function Emulator8086() {
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         if (!keepMemory) e.mem.fill(0); 
+        e.cursorX = 0;
+        e.cursorY = 0;
         setErrorMessage(null);
         forceRender();
     };
@@ -506,6 +513,8 @@ export default function Emulator8086() {
         e.t2High = false;
         e.freq = 0;
         e.beeping = false;
+        e.cursorX = 0;
+        e.cursorY = 0;
         setErrorMessage(null);
         setIoLogs([]);
         stopAudio();
@@ -575,9 +584,68 @@ export default function Emulator8086() {
         f.ZF = (r & (1<<6)) ? 1 : 0; f.SF = (r & (1<<7)) ? 1 : 0; f.IF = (r & (1<<9)) ? 1 : 0;
         f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
     };
-    const writeToVGA = (e, c) => {
-        for (let i = 0; i < VGA_COLS * VGA_ROWS; i++) {
-            if (e.mem[VGA_BASE + i * 2] === 0) { e.mem[VGA_BASE + i * 2] = c.charCodeAt(0); e.mem[VGA_BASE + i * 2 + 1] = 0x07; break; }
+    
+    // BIOS Interrupt 10h (Video Services) Handler
+    const handleInt10 = (e) => {
+        const ax = e.reg.AX; const bx = e.reg.BX; const cx = e.reg.CX; const dx = e.reg.DX;
+        const ah = (ax >> 8) & 0xFF; const al = ax & 0xFF;
+        const bh = (bx >> 8) & 0xFF; const bl = bx & 0xFF;
+        const ch = (cx >> 8) & 0xFF; const cl = cx & 0xFF;
+        const dh = (dx >> 8) & 0xFF; const dl = dx & 0xFF;
+
+        const scrollUp = (lines, attr, r1, c1, r2, c2) => {
+            attr = attr || 0x07;
+            if (lines === 0) { 
+                for (let r = r1; r <= r2; r++) {
+                    for (let c = c1; c <= c2; c++) {
+                        const idx = VGA_BASE + (r * 80 + c) * 2;
+                        e.mem[idx] = 0; e.mem[idx + 1] = attr;
+                    }
+                }
+            } else {
+                for (let r = r1; r <= r2 - lines; r++) {
+                    for (let c = c1; c <= c2; c++) {
+                        const dest = VGA_BASE + (r * 80 + c) * 2;
+                        const src = VGA_BASE + ((r + lines) * 80 + c) * 2;
+                        e.mem[dest] = e.mem[src]; e.mem[dest + 1] = e.mem[src + 1];
+                    }
+                }
+                for (let r = r2 - lines + 1; r <= r2; r++) {
+                    for (let c = c1; c <= c2; c++) {
+                        const idx = VGA_BASE + (r * 80 + c) * 2;
+                        e.mem[idx] = 0; e.mem[idx + 1] = attr;
+                    }
+                }
+            }
+        };
+
+        if (ah === 0x00) { // Set video mode / Clear screen
+            for (let i = 0; i < VGA_SIZE; i += 2) { e.mem[VGA_BASE + i] = 0; e.mem[VGA_BASE + i + 1] = 0x07; }
+            e.cursorX = 0; e.cursorY = 0;
+        } else if (ah === 0x02) { // Set cursor position
+            e.cursorY = Math.min(dh, 24);
+            e.cursorX = Math.min(dl, 79);
+        } else if (ah === 0x06) { // Scroll up / Clear window
+            scrollUp(al, bh, ch, cl, dh, dl);
+        } else if (ah === 0x09) { // Write char and attr at cursor position
+            let cX = e.cursorX; let cY = e.cursorY;
+            for(let i = 0; i < cx; i++) {
+                const idx = VGA_BASE + (cY * 80 + cX) * 2;
+                e.mem[idx] = al; e.mem[idx+1] = bl;
+                cX++; if (cX >= 80) { cX = 0; cY++; }
+                if (cY >= 25) break; 
+            }
+        } else if (ah === 0x0E) { // Teletype output
+            if (al === 13) { e.cursorX = 0; } // Carriage Return \r
+            else if (al === 10) { e.cursorY++; } // Line Feed \n
+            else if (al === 8) { if (e.cursorX > 0) e.cursorX--; } // Backspace \b
+            else {
+                const idx = VGA_BASE + (e.cursorY * 80 + e.cursorX) * 2;
+                e.mem[idx] = al; e.mem[idx + 1] = 0x07;
+                e.cursorX++;
+            }
+            if (e.cursorX >= 80) { e.cursorX = 0; e.cursorY++; }
+            if (e.cursorY >= 25) { scrollUp(1, 0x07, 0, 0, 24, 79); e.cursorY = 24; }
         }
     };
 
@@ -807,7 +875,7 @@ export default function Emulator8086() {
 
             case "INT": {
                 const vec = getOpVal(e, args[0]);
-                if (vec === 0x10 && ((r.AX >> 8) & 0xFF) === 0x0E) writeToVGA(e, String.fromCharCode(r.AX & 0xFF));
+                if (vec === 0x10) handleInt10(e);
                 break;
             }
             case "HLT": return false;
@@ -1209,7 +1277,7 @@ export default function Emulator8086() {
 
         if (op === 0xCD) {
             const iNum = fetch8();
-            if (iNum === 0x10 && ((e.reg.AX>>8)&0xFF) === 0x0E) writeToVGA(e, String.fromCharCode(e.reg.AX & 0xFF));
+            if (iNum === 0x10) handleInt10(e);
             else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
             return true;
         }
@@ -1369,7 +1437,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
-                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} />
+                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={e.cursorX} cursorY={e.cursorY} />
                         <MemoryViewer 
                             title="Memory View 1" 
                             getMemByte={getMemByteSafe} 
@@ -1398,6 +1466,11 @@ export default function Emulator8086() {
                 </div>
             </div>
             <style>{`
+                @keyframes cursor-blink {
+                    0%, 49% { opacity: 1; }
+                    50%, 100% { opacity: 0; }
+                }
+                .animate-cursor-blink { animation: cursor-blink 1s step-end infinite; }
                 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
             `}</style>
