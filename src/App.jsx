@@ -585,33 +585,181 @@ export default function Emulator8086() {
             prefix = op; op = args.length > 0 ? args[0].toUpperCase() : "NOP"; args = args.slice(1);
         }
         
+        // Helper nhận diện 8-bit hay 16-bit dựa trên tên toán hạng
+        const is8Bit = (arg) => arg && (["AL","AH","BL","BH","CL","CH","DL","DH"].includes(arg.toUpperCase()) || arg.toUpperCase().includes("BYTE"));
+
         switch (op) {
             case "MOV": writeOpVal(e, args[0], getOpVal(e, args[1])); break;
-            case "ADD": case "SUB": case "CMP": {
-                const v1 = getOpVal(e, args[0]); const v2 = getOpVal(e, args[1]); let res = 0;
-                if (op === "ADD") { res = v1 + v2; f.CF = res > 0xFFFF ? 1 : 0; }
-                if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; }
-                if (op !== "CMP") writeOpVal(e, args[0], res);
-                f.ZF = (res & 0xFFFF) === 0 ? 1 : 0; f.SF = (res & 0x8000) ? 1 : 0; f.PF = calcParity(res); break;
+            case "XCHG": { const t = getOpVal(e, args[0]); writeOpVal(e, args[0], getOpVal(e, args[1])); writeOpVal(e, args[1], t); break; }
+            case "LEA": { 
+                const innerMatch = args[1].match(/\[(.*)\]/); 
+                if (innerMatch) writeOpVal(e, args[0], resolveOffset(e, innerMatch[1])); 
+                break; 
             }
-            case "INC": case "DEC": { const v = op === "INC" ? getOpVal(e, args[0]) + 1 : getOpVal(e, args[0]) - 1; writeOpVal(e, args[0], v); f.ZF = (v & 0xFFFF) === 0 ? 1 : 0; break; }
+            case "ADD": case "ADC": case "SUB": case "SBB": case "CMP": case "AND": case "OR": case "XOR": case "TEST": {
+                const v1 = getOpVal(e, args[0]); const v2 = getOpVal(e, args[1]);
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                let res = 0;
+                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; }
+                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; }
+                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; }
+                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; }
+                else if (op === "AND" || op === "TEST") { res = v1 & v2; f.CF = 0; f.OF = 0; }
+                else if (op === "OR") { res = v1 | v2; f.CF = 0; f.OF = 0; }
+                else if (op === "XOR") { res = v1 ^ v2; f.CF = 0; f.OF = 0; }
+
+                if (op !== "CMP" && op !== "TEST") writeOpVal(e, args[0], res);
+                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(res);
+                break;
+            }
+            case "INC": case "DEC": { 
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                const v = op === "INC" ? getOpVal(e, args[0]) + 1 : getOpVal(e, args[0]) - 1; 
+                writeOpVal(e, args[0], v); 
+                f.ZF = (v & mask) === 0 ? 1 : 0; f.SF = (v & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(v);
+                break; 
+            }
+            case "NOT": {
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                writeOpVal(e, args[0], (~getOpVal(e, args[0])) & mask); 
+                break;
+            }
+            case "NEG": {
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                const v = getOpVal(e, args[0]); const res = (0 - v) & mask;
+                writeOpVal(e, args[0], res);
+                f.CF = v === 0 ? 0 : 1; f.ZF = res === 0 ? 1 : 0; f.SF = (res & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(res);
+                break;
+            }
+            case "MUL": case "IMUL": case "DIV": case "IDIV": {
+                const is8 = is8Bit(args[0]); const v = getOpVal(e, args[0]);
+                if (op === "MUL") {
+                    if (!is8) { const ur = (r.AX * v) >>> 0; r.AX = ur & 0xFFFF; r.DX = (ur >>> 16) & 0xFFFF; f.CF = f.OF = r.DX !== 0 ? 1 : 0; }
+                    else { const ur = (r.AX & 0xFF) * v; r.AX = ur & 0xFFFF; f.CF = f.OF = (ur & 0xFF00) !== 0 ? 1 : 0; }
+                } else if (op === "IMUL") {
+                    if (!is8) { const sr = ((r.AX<<16)>>16) * ((v<<16)>>16); r.AX = sr & 0xFFFF; r.DX = (sr>>16) & 0xFFFF; f.CF = f.OF = ((r.AX&0x8000)?r.DX===0xFFFF:r.DX===0)?0:1; }
+                    else { const sr = (((r.AX&0xFF)<<24)>>24) * ((v<<24)>>24); r.AX = sr & 0xFFFF; f.CF=f.OF=((sr&0x80)?(sr&0xFF00)===0xFF00:(sr&0xFF00)===0)?0:1; }
+                } else if (op === "DIV") {
+                    if (v === 0) throw new Error("Divide by zero");
+                    if (!is8) { const dvnd = (r.DX * 0x10000) + r.AX; const q = Math.floor(dvnd/v); if(q>0xFFFF) throw new Error("Overflow"); r.AX = q&0xFFFF; r.DX = dvnd%v; }
+                    else { const dvnd = r.AX; const q = Math.floor(dvnd/v); if(q>0xFF) throw new Error("Overflow"); r.AX = ((dvnd%v)<<8) | (q&0xFF); }
+                } else if (op === "IDIV") {
+                    if (v === 0) throw new Error("Divide by zero");
+                    if (!is8) { const dvnd = (r.DX<<16)|r.AX; const ds = (v<<16)>>16; const q = Math.trunc(dvnd/ds); if(q>32767||q<-32768) throw new Error("Overflow"); r.AX=q&0xFFFF; r.DX=dvnd%ds; }
+                    else { const dvnd = (r.AX<<16)>>16; const ds = (v<<24)>>24; const q = Math.trunc(dvnd/ds); if(q>127||q<-128) throw new Error("Overflow"); r.AX=(((dvnd%ds)&0xFF)<<8)|(q&0xFF); }
+                }
+                break;
+            }
+            case "SHL": case "SAL": case "SHR": case "SAR": case "ROL": case "ROR": case "RCL": case "RCR": {
+                const is8 = is8Bit(args[0]); const maxVal = is8 ? 0xFF : 0xFFFF; const msbMask = is8 ? 0x80 : 0x8000; const shiftAmt = is8 ? 7 : 15;
+                let count = 1; if(args.length > 1) count = args[1].toUpperCase()==="CL" ? (r.CX&0xFF) : getOpVal(e, args[1]);
+                count &= 0x1F;
+                if(count > 0) {
+                    let val = getOpVal(e, args[0]);
+                    for(let i=0; i<count; i++) {
+                        const msb = (val & msbMask) !== 0; const lsb = (val & 1) !== 0;
+                        if(op==="SHL"||op==="SAL") { f.CF = msb?1:0; val = (val<<1)&maxVal; }
+                        else if(op==="SHR") { f.CF = lsb?1:0; val = (val>>1)&maxVal; }
+                        else if(op==="SAR") { f.CF = lsb?1:0; val = (val&msbMask) | ((val>>1)&(maxVal>>1)); }
+                        else if(op==="ROL") { f.CF = msb?1:0; val = ((val<<1)|f.CF)&maxVal; }
+                        else if(op==="ROR") { f.CF = lsb?1:0; val = ((val>>1)|(f.CF<<shiftAmt))&maxVal; }
+                        else if(op==="RCL") { const oCF=f.CF; f.CF=msb?1:0; val=((val<<1)|oCF)&maxVal; }
+                        else if(op==="RCR") { const oCF=f.CF; f.CF=lsb?1:0; val=((val>>1)|(oCF<<shiftAmt))&maxVal; }
+                    }
+                    writeOpVal(e, args[0], val);
+                    f.ZF = val===0?1:0; f.SF = (val&msbMask)?1:0; f.PF = calcParity(val);
+                }
+                break;
+            }
+            case "CBW": r.AX = (r.AX & 0x80) ? (0xFF00 | (r.AX & 0xFF)) : (r.AX & 0xFF); break;
+            case "CWD": r.DX = (r.AX & 0x8000) ? 0xFFFF : 0x0000; break;
+            case "PUSHA": { const sp = r.SP; push16(e, r.AX); push16(e, r.CX); push16(e, r.DX); push16(e, r.BX); push16(e, sp); push16(e, r.BP); push16(e, r.SI); push16(e, r.DI); break; }
+            case "POPA": { r.DI = pop16(e); r.SI = pop16(e); r.BP = pop16(e); pop16(e); r.BX = pop16(e); r.DX = pop16(e); r.CX = pop16(e); r.AX = pop16(e); break; }
+            case "LEAVE": { r.SP = r.BP; r.BP = pop16(e); break; }
+            case "PUSHF": push16(e, packFlags(e)); break;
+            case "POPF": unpackFlags(e, pop16(e)); break;
+            case "CLI": f.IF = 0; break; case "STI": f.IF = 1; break;
+            case "CLC": f.CF = 0; break; case "STC": f.CF = 1; break; case "CMC": f.CF = 1 - f.CF; break;
+            case "CLD": f.DF = 0; break; case "STD": f.DF = 1; break;
+
             case "OUT": handleOut(getOpVal(e, args[0]), getOpVal(e, args[1])); break;
             case "IN": writeOpVal(e, args[0], e.ioPorts[getOpVal(e, args[1])] || 0); break;
-            case "LOOP": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0) nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "JZ": case "JE": if (f.ZF === 1) nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "JNZ": case "JNE": if (f.ZF === 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            
             case "JMP": nextIP = e.labels[args[0].toUpperCase()]; break;
             case "CALL": push16(e, nextIP); nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "RET": nextIP = pop16(e); break;
+            case "RET": nextIP = pop16(e); if(args.length>0) r.SP = (r.SP + getOpVal(e, args[0])) & 0xFFFF; break;
+            case "RETF": nextIP = pop16(e); r.CS = pop16(e); if(args.length>0) r.SP = (r.SP + getOpVal(e, args[0])) & 0xFFFF; break;
+            case "IRET": nextIP = pop16(e); r.CS = pop16(e); unpackFlags(e, pop16(e)); break;
+            
             case "PUSH": push16(e, getOpVal(e, args[0])); break;
             case "POP": writeOpVal(e, args[0], pop16(e)); break;
+            
+            case "LOOP": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0) nextIP = e.labels[args[0].toUpperCase()]; break;
+            case "LOOPE": case "LOOPZ": r.CX=(r.CX-1)&0xFFFF; if(r.CX!==0 && f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "LOOPNE": case "LOOPNZ": r.CX=(r.CX-1)&0xFFFF; if(r.CX!==0 && f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JCXZ": if(r.CX===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            
+            // Conditional Jumps
+            case "JE": case "JZ": if(f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JNE": case "JNZ": if(f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JA": case "JNBE": if(f.CF===0 && f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JAE": case "JNB": case "JNC": if(f.CF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JB": case "JNAE": case "JC": if(f.CF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JBE": case "JNA": if(f.CF===1 || f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JG": case "JNLE": if(f.ZF===0 && f.SF===f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JGE": case "JNL": if(f.SF===f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JL": case "JNGE": if(f.SF!==f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JLE": case "JNG": if(f.ZF===1 || f.SF!==f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JO": if(f.OF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JNO": if(f.OF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JP": case "JPE": if(f.PF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JNP": case "JPO": if(f.PF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JS": if(f.SF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
+            case "JNS": if(f.SF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
+
+            case "MOVSB": case "MOVSW": case "MOVS":
+            case "LODSB": case "LODSW": case "LODS":
+            case "STOSB": case "STOSW": case "STOS":
+            case "CMPSB": case "CMPSW": case "CMPS":
+            case "SCASB": case "SCASW": case "SCAS": {
+                const isWord = op.endsWith("W") || args.includes("WORD");
+                const sz = isWord ? 2 : 1; const dir = f.DF === 0 ? sz : -sz;
+                if (op.startsWith("MOVS")) {
+                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
+                    if (isWord) writeMemWord(e, d, readMemWord(e, s)); else e.mem[d] = e.mem[s];
+                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("LODS")) {
+                    const s = calcPhys(r.DS, r.SI);
+                    if (isWord) r.AX = readMemWord(e, s); else r.AX = (r.AX & 0xFF00) | e.mem[s];
+                    r.SI = (r.SI + dir) & 0xFFFF;
+                } else if (op.startsWith("STOS")) {
+                    const d = calcPhys(r.ES, r.DI);
+                    if (isWord) writeMemWord(e, d, r.AX); else e.mem[d] = r.AX & 0xFF;
+                    r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("CMPS")) {
+                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
+                    const v1 = isWord ? readMemWord(e, s) : e.mem[s]; const v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                    const res = v1 - v2;
+                    f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
+                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
+                } else if (op.startsWith("SCAS")) {
+                    const d = calcPhys(r.ES, r.DI);
+                    const v1 = isWord ? r.AX : r.AX & 0xFF; const v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                    const res = v1 - v2;
+                    f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
+                    r.DI = (r.DI + dir) & 0xFFFF;
+                }
+                break;
+            }
+
             case "INT": {
                 const vec = getOpVal(e, args[0]);
                 if (vec === 0x10 && ((r.AX >> 8) & 0xFF) === 0x0E) writeToVGA(e, String.fromCharCode(r.AX & 0xFF));
                 break;
             }
             case "HLT": return false;
-            default: break;
+            case "NOP": break;
+            default: throw new Error(`AST INTERPRETER ERROR: Unsupported Opcode ${op}`);
         }
         
         if (prefix) {
