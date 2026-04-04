@@ -48,6 +48,15 @@ const calcParity = (val) => {
     return (p === 0) ? 1 : 0;
 };
 
+const VGA_BASE = 0xB8000;      // VGA text mode VRAM base address
+const BOOT_LOAD_ADDR = 0x7C00; // BIOS boot sector load address
+const INITIAL_SP = 0xFFFE;     // Initial stack pointer value
+const PC_TIMER_FREQ = 1193182; // PC Timer base frequency in Hz (1.193182 MHz)
+const VGA_COLS = 80;           // VGA text mode columns
+const VGA_ROWS = 25;           // VGA text mode rows
+const MEM_SIZE = 1048576;      // Total memory size (1 MB)
+const DISK_SIZE = 65536;       // Virtual disk size (64 KB)
+
 // ==========================================
 // 2. UI SUB-COMPONENTS
 // ==========================================
@@ -72,12 +81,12 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
             <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center">
                 <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
-                <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Assemble</button>
+                <button onClick={assemble} title="Ctrl+Enter" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Assemble</button>
                 <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">🔄 Reset</button>
-                <button onClick={toggleRun} disabled={!isAssembled && execMode === 'AST'} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${(!isAssembled && execMode === 'AST') ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
+                <button onClick={toggleRun} disabled={!isAssembled && execMode === 'AST'} title="F5" className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${(!isAssembled && execMode === 'AST') ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
                     {isRunning ? "Stop" : "Run"}
                 </button>
-                <button onClick={stepUI} disabled={isRunning || (!isAssembled && execMode === 'AST')} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Step</button>
+                <button onClick={stepUI} disabled={isRunning || (!isAssembled && execMode === 'AST')} title="F8" className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Step</button>
             </div>
         </div>
     );
@@ -146,8 +155,8 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
                         <div className="bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-400 px-5 py-4 rounded-xl shadow-2xl flex items-center space-x-3">
                             <span className="text-2xl">🔒</span>
                             <div className="flex flex-col">
-                                <span className="font-bold text-xs uppercase tracking-widest mb-1">Mã Assembly bị khóa</span>
-                                <span className="text-[10px] text-slate-400">Đang mô phỏng mã máy (X86 Hardware)</span>
+                            <span className="font-bold text-xs uppercase tracking-widest mb-1">Assembly Code Locked</span>
+                                <span className="text-[10px] text-slate-400">Simulating machine code (X86 Hardware)</span>
                             </div>
                         </div>
                     </div>
@@ -168,12 +177,12 @@ function VGAMonitor({ memory, cs, ip }) {
                 </div>
             </div>
             <div className="bg-black p-2 rounded border border-slate-900 font-mono text-[11px] leading-none whitespace-pre select-none ring-2 ring-black">
-                {Array.from({ length: 25 }).map((_, y) => (
+                {Array.from({ length: VGA_ROWS }).map((_, y) => (
                     <div key={y} className="flex h-[1.1em]">
-                        {Array.from({ length: 80 }).map((_, x) => {
-                            const offset = (y * 80 + x) * 2;
-                            const charCode = memory[0xB8000 + offset];
-                            const attr = memory[0xB8000 + offset + 1] || 0x07;
+                        {Array.from({ length: VGA_COLS }).map((_, x) => {
+                            const offset = (y * VGA_COLS + x) * 2;
+                            const charCode = memory[VGA_BASE + offset];
+                            const attr = memory[VGA_BASE + offset + 1] || 0x07;
                             const fg = DOS_COLORS[attr & 0x0F];
                             const bg = DOS_COLORS[(attr >> 4) & 0x0F];
                             const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
@@ -374,13 +383,15 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
 // ==========================================
 
 export default function Emulator8086() {
-    const [code, setCode] = useState(DEFAULT_CODE);
+    const [code, setCode] = useState(() => {
+        try { return localStorage.getItem('emulator8086_code') || DEFAULT_CODE; } catch { /* storage unavailable */ return DEFAULT_CODE; }
+    });
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
     const [keepMemory, setKeepMemory] = useState(false);
     
-    // Quản lý chế độ Engine: AST (Interpreter từ Editor) hoặc BIN (Hardware x86 Decode từ RAM)
+    // Execution mode: AST (Interpreter from editor) or BIN (Hardware x86 decode from RAM)
     const [execMode, setExecMode] = useState("AST"); 
 
     const [orgOffset, setOrgOffset] = useState("0x1000"); 
@@ -400,10 +411,10 @@ export default function Emulator8086() {
     const oscRef = useRef(null);
 
     const eng = useRef({
-        reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: 0xFFFE, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
+        reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(1048576),
-        disk: new Uint8Array(65536),
+        mem: new Uint8Array(MEM_SIZE),
+        disk: new Uint8Array(DISK_SIZE),
         ioPorts: {},
         insts: [],
         labels: {},
@@ -411,10 +422,16 @@ export default function Emulator8086() {
         t2Div: 0,
         t2High: false,
         freq: 0,
-        beeping: false
+        beeping: false,
+        cursRow: 0,
+        cursCol: 0
     });
 
     const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-20));
+
+    useEffect(() => {
+        try { localStorage.setItem('emulator8086_code', code); } catch { /* storage unavailable */ }
+    }, [code]);
 
     const handleRegChange = (reg, valStr) => {
         let val = parseInt(valStr.replace(/0x/i, ''), 16);
@@ -433,10 +450,10 @@ export default function Emulator8086() {
     const handleLoadMemory = (startAddr, data, filename) => {
         const e = eng.current;
         for (let i = 0; i < data.length; i++) {
-            if (startAddr + i < 1048576) e.mem[startAddr + i] = data[i];
+            if (startAddr + i < MEM_SIZE) e.mem[startAddr + i] = data[i];
         }
         addLog(`Loaded ${data.length} bytes from ${filename} to ${toHex(startAddr, 5)}`);
-        setExecMode("BIN"); // Tự động bật chế độ Lõi nhị phân
+        setExecMode("BIN"); // Auto-enable binary hardware mode
         forceRender();
     };
 
@@ -446,7 +463,7 @@ export default function Emulator8086() {
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = 0xFFFE;
+        e.reg.SP = INITIAL_SP;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         if (!keepMemory) e.mem.fill(0); 
@@ -457,7 +474,7 @@ export default function Emulator8086() {
     const resetCPU = () => {
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = 0xFFFE;
+        e.reg.SP = INITIAL_SP;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         if (!keepMemory) e.mem.fill(0);
         e.ioPorts = {};
@@ -465,6 +482,8 @@ export default function Emulator8086() {
         e.t2High = false;
         e.freq = 0;
         e.beeping = false;
+        e.cursRow = 0;
+        e.cursCol = 0;
         setErrorMessage(null);
         setIoLogs([]);
         stopAudio();
@@ -491,10 +510,13 @@ export default function Emulator8086() {
     };
 
     const stopAudio = () => {
-        if (oscRef.current) { try { oscRef.current.stop(); } catch (e) { } oscRef.current = null; }
+        if (oscRef.current) { try { oscRef.current.stop(); } catch { /* already stopped */ } oscRef.current = null; }
     };
 
     const handleKeyDown = (e) => {
+        if (e.key === 'F5') { e.preventDefault(); toggleRun(); return; }
+        if (e.key === 'F8') { e.preventDefault(); if (!isRunningRef.current) stepUI(); return; }
+        if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); assemble(); return; }
         if (e.key.length === 1) {
             eng.current.mem[0x0400] = e.key.charCodeAt(0);
             eng.current.ioPorts[0x60] = e.key.charCodeAt(0);
@@ -502,7 +524,7 @@ export default function Emulator8086() {
         }
     };
 
-    // Shared I/O Handler cho cả 2 Engine
+    // Shared I/O handler for both execution engines
     const handleOut = (port, val) => {
         const e = eng.current;
         if (port === 0x70) e.diskSectorSelect = val % 256;
@@ -513,7 +535,7 @@ export default function Emulator8086() {
         }
         if (port === 0x42) {
             if (!e.t2High) { e.t2Div = val; e.t2High = true; }
-            else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = 1193182 / e.t2Div; }
+            else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = PC_TIMER_FREQ / e.t2Div; }
         }
         if (port === 0x61) {
             const enable = (val & 0x03) === 0x03;
@@ -522,7 +544,7 @@ export default function Emulator8086() {
         addLog(`OUT 0x${port.toString(16).toUpperCase()}: 0x${val.toString(16).toUpperCase()}`);
     };
 
-    // Hàm tiện ích bộ nhớ
+    // Memory utility functions
     const readMemWord = (e, phys) => (e.mem[phys + 1] << 8) | e.mem[phys];
     const writeMemWord = (e, phys, val) => { e.mem[phys] = val & 0xFF; e.mem[phys + 1] = (val >> 8) & 0xFF; };
     const push16 = (e, val) => { e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeMemWord(e, calcPhys(e.reg.SS, e.reg.SP), val); };
@@ -541,13 +563,18 @@ export default function Emulator8086() {
         f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
     };
     const writeToVGA = (e, c) => {
-        for (let i = 0; i < 2000; i++) {
-            if (e.mem[0xB8000 + i * 2] === 0) { e.mem[0xB8000 + i * 2] = c.charCodeAt(0); e.mem[0xB8000 + i * 2 + 1] = 0x07; break; }
-        }
+        if (c === '\r') { e.cursCol = 0; return; }
+        if (c === '\n') { e.cursRow++; if (e.cursRow >= VGA_ROWS) e.cursRow = VGA_ROWS - 1; return; }
+        if (c === '\b') { if (e.cursCol > 0) { e.cursCol--; e.mem[VGA_BASE + (e.cursRow * VGA_COLS + e.cursCol) * 2] = 0; } return; }
+        if (e.cursCol >= VGA_COLS) { e.cursCol = 0; e.cursRow++; if (e.cursRow >= VGA_ROWS) e.cursRow = VGA_ROWS - 1; }
+        const pos = (e.cursRow * VGA_COLS + e.cursCol) * 2;
+        e.mem[VGA_BASE + pos] = c.charCodeAt(0);
+        e.mem[VGA_BASE + pos + 1] = 0x07;
+        e.cursCol++;
     };
 
     // ===============================================
-    // ENGINE 1: AST INTERPRETER (Trình Thông Dịch Chuỗi)
+    // ENGINE 1: AST INTERPRETER
     // ===============================================
     const resolveOffset = (e, s) => {
         s = s.trim().toUpperCase();
@@ -599,7 +626,7 @@ export default function Emulator8086() {
             prefix = op; op = args.length > 0 ? args[0].toUpperCase() : "NOP"; args = args.slice(1);
         }
         
-        // Helper nhận diện 8-bit hay 16-bit dựa trên tên toán hạng
+        // Helper to determine 8-bit vs 16-bit based on operand name
         const is8Bit = (arg) => arg && (["AL","AH","BL","BH","CL","CH","DL","DH"].includes(arg.toUpperCase()) || arg.toUpperCase().includes("BYTE"));
 
         switch (op) {
@@ -612,25 +639,27 @@ export default function Emulator8086() {
             }
             case "ADD": case "ADC": case "SUB": case "SBB": case "CMP": case "AND": case "OR": case "XOR": case "TEST": {
                 const v1 = getOpVal(e, args[0]); const v2 = getOpVal(e, args[1]);
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF; const signMask = is8 ? 0x80 : 0x8000;
                 let res = 0;
-                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; }
-                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; }
-                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; }
-                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; }
+                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; f.OF = ((~(v1^v2) & (v1^res)) & signMask) ? 1 : 0; }
+                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; f.OF = ((~(v1^v2) & (v1^res)) & signMask) ? 1 : 0; }
+                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; f.OF = (((v1^v2) & (v1^res)) & signMask) ? 1 : 0; }
+                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; f.OF = (((v1^v2) & (v1^res)) & signMask) ? 1 : 0; }
                 else if (op === "AND" || op === "TEST") { res = v1 & v2; f.CF = 0; f.OF = 0; }
                 else if (op === "OR") { res = v1 | v2; f.CF = 0; f.OF = 0; }
                 else if (op === "XOR") { res = v1 ^ v2; f.CF = 0; f.OF = 0; }
 
                 if (op !== "CMP" && op !== "TEST") writeOpVal(e, args[0], res);
-                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(res);
+                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & signMask) ? 1 : 0; f.PF = calcParity(res);
                 break;
             }
             case "INC": case "DEC": { 
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                const v = op === "INC" ? getOpVal(e, args[0]) + 1 : getOpVal(e, args[0]) - 1; 
+                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF; const signMask = is8 ? 0x80 : 0x8000;
+                const oldVal = getOpVal(e, args[0]);
+                const v = (op === "INC" ? oldVal + 1 : oldVal - 1) & mask;
                 writeOpVal(e, args[0], v); 
-                f.ZF = (v & mask) === 0 ? 1 : 0; f.SF = (v & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(v);
+                f.ZF = v === 0 ? 1 : 0; f.SF = (v & signMask) ? 1 : 0; f.PF = calcParity(v);
+                f.OF = op === "INC" ? (oldVal === (mask >> 1) ? 1 : 0) : (oldVal === signMask ? 1 : 0);
                 break; 
             }
             case "NOT": {
@@ -768,7 +797,36 @@ export default function Emulator8086() {
 
             case "INT": {
                 const vec = getOpVal(e, args[0]);
-                if (vec === 0x10 && ((r.AX >> 8) & 0xFF) === 0x0E) writeToVGA(e, String.fromCharCode(r.AX & 0xFF));
+                if (vec === 0x10) {
+                    const ah = (r.AX >> 8) & 0xFF;
+                    if (ah === 0x0E) { // TTY character output: AL=char, BH=page, BL=color
+                        writeToVGA(e, String.fromCharCode(r.AX & 0xFF));
+                    } else if (ah === 0x00) { // Set video mode: clear screen
+                        e.mem.fill(0, VGA_BASE, VGA_BASE + VGA_COLS * VGA_ROWS * 2);
+                        e.cursRow = 0; e.cursCol = 0;
+                    } else if (ah === 0x02) { // Set cursor position: DH=row, DL=col, BH=page
+                        e.cursRow = (r.DX >> 8) & 0xFF; e.cursCol = r.DX & 0xFF;
+                    } else if (ah === 0x06) { // Scroll up / clear window
+                        e.mem.fill(0, VGA_BASE, VGA_BASE + VGA_COLS * VGA_ROWS * 2);
+                        e.cursRow = 0; e.cursCol = 0;
+                    } else if (ah === 0x09) { // Write character + attribute: AL=char, BH=page, BL=attr, CX=count
+                        const ch = r.AX & 0xFF; const attr = r.BX & 0xFF; const count = r.CX & 0xFFFF;
+                        for (let i = 0; i < count; i++) {
+                            const pos = (e.cursRow * VGA_COLS + e.cursCol + i) * 2;
+                            if (VGA_BASE + pos + 1 < MEM_SIZE) { e.mem[VGA_BASE + pos] = ch; e.mem[VGA_BASE + pos + 1] = attr; }
+                        }
+                    }
+                } else if (vec === 0x21) {
+                    const ah = (r.AX >> 8) & 0xFF;
+                    if (ah === 0x02) { // Write character to stdout: DL=char
+                        writeToVGA(e, String.fromCharCode(r.DX & 0xFF));
+                    } else if (ah === 0x09) { // Write $-terminated string to stdout: DS:DX=string
+                        let addr = calcPhys(r.DS, r.DX);
+                        while (addr < MEM_SIZE && e.mem[addr] !== 0x24) { writeToVGA(e, String.fromCharCode(e.mem[addr++])); }
+                    } else if (ah === 0x4C) { // Exit program
+                        return false;
+                    }
+                }
                 break;
             }
             case "HLT": return false;
@@ -788,7 +846,7 @@ export default function Emulator8086() {
     };
 
     // ===============================================
-    // ENGINE 2: TRUE HARDWARE X86 DECODER (Lõi Nhị phân)
+    // ENGINE 2: TRUE HARDWARE X86 DECODER
     // ===============================================
     const executeBinaryStep = () => {
         const e = eng.current;
@@ -823,7 +881,7 @@ export default function Emulator8086() {
             op = fetch8();
         }
 
-        const modrmDec = (isWord) => {
+        const modrmDec = () => {
             const b = fetch8();
             const mod = b>>6; const reg = (b>>3)&7; const rm = b&7;
             let addr = -1; let ds = e.reg.DS;
@@ -851,32 +909,32 @@ export default function Emulator8086() {
         if (op === 0x90) return true;
         if (op === 0xF4) return false;
         
-        // Xử lý các lệnh thao tác Cờ (Flags)
-        if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI (Clear Interrupt Flag)
-        if (op === 0xFB) { e.flags.IF = 1; return true; } // STI (Set Interrupt Flag)
-        if (op === 0xF8) { e.flags.CF = 0; return true; } // CLC (Clear Carry Flag)
-        if (op === 0xF9) { e.flags.CF = 1; return true; } // STC (Set Carry Flag)
-        if (op === 0xFC) { e.flags.DF = 0; return true; } // CLD (Clear Direction Flag)
-        if (op === 0xFD) { e.flags.DF = 1; return true; } // STD (Set Direction Flag)
-        if (op === 0xF5) { e.flags.CF = 1 - e.flags.CF; return true; } // CMC (Complement Carry Flag)
+        // Flag manipulation instructions
+        if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI
+        if (op === 0xFB) { e.flags.IF = 1; return true; } // STI
+        if (op === 0xF8) { e.flags.CF = 0; return true; } // CLC
+        if (op === 0xF9) { e.flags.CF = 1; return true; } // STC
+        if (op === 0xFC) { e.flags.DF = 0; return true; } // CLD
+        if (op === 0xFD) { e.flags.DF = 1; return true; } // STD
+        if (op === 0xF5) { e.flags.CF = 1 - e.flags.CF; return true; } // CMC
         
         if (op >= 0xB8 && op <= 0xBF) { setReg16(op-0xB8, fetch16()); return true; } // MOV r16, imm16
         if (op >= 0xB0 && op <= 0xB7) { setReg8(op-0xB0, fetch8()); return true; } // MOV r8, imm8
         
-        if (op === 0x8E) { const m = modrmDec(true); e.reg[["ES","CS","SS","DS"][m.reg]] = rmRd(m, true); return true; } // MOV Sreg, r/m
-        if (op === 0x8C) { const m = modrmDec(true); rmWr(m, true, e.reg[["ES","CS","SS","DS"][m.reg]]); return true; } // MOV r/m, Sreg
-        if (op === 0x8B) { const m = modrmDec(true); setReg16(m.reg, rmRd(m, true)); return true; } // MOV r16, r/m16
-        if (op === 0x8A) { const m = modrmDec(false); setReg8(m.reg, rmRd(m, false)); return true; } // MOV r8, r/m8
-        if (op === 0x89) { const m = modrmDec(true); rmWr(m, true, getReg16(m.reg)); return true; } // MOV r/m16, r16
-        if (op === 0x88) { const m = modrmDec(false); rmWr(m, false, getReg8(m.reg)); return true; } // MOV r/m8, r8
-        if (op === 0xC7) { const m = modrmDec(true); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
-        if (op === 0xC6) { const m = modrmDec(false); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
+        if (op === 0x8E) { const m = modrmDec(); e.reg[["ES","CS","SS","DS"][m.reg]] = rmRd(m, true); return true; } // MOV Sreg, r/m
+        if (op === 0x8C) { const m = modrmDec(); rmWr(m, true, e.reg[["ES","CS","SS","DS"][m.reg]]); return true; } // MOV r/m, Sreg
+        if (op === 0x8B) { const m = modrmDec(); setReg16(m.reg, rmRd(m, true)); return true; } // MOV r16, r/m16
+        if (op === 0x8A) { const m = modrmDec(); setReg8(m.reg, rmRd(m, false)); return true; } // MOV r8, r/m8
+        if (op === 0x89) { const m = modrmDec(); rmWr(m, true, getReg16(m.reg)); return true; } // MOV r/m16, r16
+        if (op === 0x88) { const m = modrmDec(); rmWr(m, false, getReg8(m.reg)); return true; } // MOV r/m8, r8
+        if (op === 0xC7) { const m = modrmDec(); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
+        if (op === 0xC6) { const m = modrmDec(); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
 
         if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const v=(getReg16(r)+1)&0xFFFF; setReg16(r,v); updFlags(v,true); return true; } // INC r16
         if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const v=(getReg16(r)-1)&0xFFFF; setReg16(r,v); updFlags(v,true); return true; } // DEC r16
-        if (op === 0xFE) { const m=modrmDec(false); const v=rmRd(m,false); const res=m.reg===0?v+1:v-1; rmWr(m,false,res); updFlags(res,false); return true; } // INC/DEC r/m8
+        if (op === 0xFE) { const m=modrmDec(); const v=rmRd(m,false); const res=m.reg===0?v+1:v-1; rmWr(m,false,res); updFlags(res,false); return true; } // INC/DEC r/m8
         if (op === 0xFF) { 
-            const m=modrmDec(true); 
+            const m=modrmDec(); 
             if(m.reg===0||m.reg===1){ const v=rmRd(m,true); const res=m.reg===0?v+1:v-1; rmWr(m,true,res); updFlags(res,true); }
             else if(m.reg===2||m.reg===4){ if(m.reg===2) push16(e, e.reg.IP); e.reg.IP=rmRd(m,true); }
             else if(m.reg===6) push16(e, rmRd(m,true));
@@ -889,8 +947,8 @@ export default function Emulator8086() {
         if (op === 0x61) { e.reg.DI = pop16(e); e.reg.SI = pop16(e); e.reg.BP = pop16(e); pop16(e); e.reg.BX = pop16(e); e.reg.DX = pop16(e); e.reg.CX = pop16(e); e.reg.AX = pop16(e); return true; } // POPA
         if (op === 0xC9) { e.reg.SP = e.reg.BP; e.reg.BP = pop16(e); return true; } // LEAVE
 
-        // Toàn bộ họ lệnh ALU (ADD, OR, ADC, SBB, AND, SUB, XOR, CMP)
-        // 1. Dạng ModR/M (0x00 đến 0x3B)
+        // Full ALU instruction family (ADD, OR, ADC, SBB, AND, SUB, XOR, CMP)
+        // 1. ModR/M form (0x00 to 0x3B)
         const isALUModRM = (op >= 0x00 && op <= 0x03) || (op >= 0x08 && op <= 0x0B) ||
                            (op >= 0x10 && op <= 0x13) || (op >= 0x18 && op <= 0x1B) ||
                            (op >= 0x20 && op <= 0x23) || (op >= 0x28 && op <= 0x2B) ||
@@ -899,20 +957,21 @@ export default function Emulator8086() {
             const aluOp = (op >> 3) & 7;
             const isWord = (op & 1) === 1;
             const dir = (op & 2) !== 0; // 1: reg <- r/m, 0: r/m <- reg
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             const rmVal = rmRd(m, isWord);
             const regVal = isWord ? getReg16(m.reg) : getReg8(m.reg);
             
             const dst = dir ? regVal : rmVal;
             const src = dir ? rmVal : regVal;
+            const signMask = isWord ? 0x8000 : 0x80;
             
             let res = 0;
-            if (aluOp===0) { res = dst + src; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + src; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^src) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===1) { res = dst | src; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^src) & (dst^res)) & signMask) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; e.flags.OF = (((dst^src) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===4) { res = dst & src; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; } // SUB or CMP
+            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; e.flags.OF = (((dst^src) & (dst^res)) & signMask) ? 1 : 0; } // SUB or CMP
             else if (aluOp===6) { res = dst ^ src; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -924,21 +983,22 @@ export default function Emulator8086() {
             return true;
         }
 
-        // 2. Dạng thanh ghi Accumulator (0x04, 0x05, 0x0C, 0x0D, ... 0x3C, 0x3D)
+        // 2. Accumulator register form (0x04, 0x05, 0x0C, 0x0D, ... 0x3C, 0x3D)
         const isALUAcc = (op & 0xC6) === 0x04;
         if (isALUAcc) {
             const aluOp = (op >> 3) & 7;
             const isWord = (op & 1) === 1;
             const imm = isWord ? fetch16() : fetch8();
             const dst = isWord ? getReg16(0) : getReg8(0);
+            const signMask = isWord ? 0x8000 : 0x80;
             
             let res = 0;
-            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = (((dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; }
+            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = (((dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -946,27 +1006,28 @@ export default function Emulator8086() {
             return true;
         }
 
-        // 3. Dạng Immediate vào r/m (0x80, 0x81, 0x82, 0x83)
+        // 3. Immediate to r/m (0x80, 0x81, 0x82, 0x83)
         if (op >= 0x80 && op <= 0x83) {
             const isWord = op === 0x81 || op === 0x83;
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             let imm = fetch8();
             if (op === 0x81) {
                 const hi = fetch8();
                 imm = (hi << 8) | imm;
             } else if (op === 0x83) {
-                imm = imm << 24 >> 24; // Mở rộng dấu 8-bit thành 16-bit
+                imm = imm << 24 >> 24; // Sign-extend 8-bit to 16-bit
             }
             const dst = rmRd(m, isWord);
             const aluOp = m.reg;
+            const signMask = isWord ? 0x8000 : 0x80;
             
             let res = 0;
-            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((~(dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = (((dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; }
+            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = (((dst^imm) & (dst^res)) & signMask) ? 1 : 0; }
             else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -977,7 +1038,7 @@ export default function Emulator8086() {
         // 4. TEST r/m, r (0x84, 0x85)
         if (op === 0x84 || op === 0x85) {
             const isWord = op === 0x85;
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             const v1 = rmRd(m, isWord);
             const v2 = isWord ? getReg16(m.reg) : getReg8(m.reg);
             const res = v1 & v2;
@@ -988,7 +1049,7 @@ export default function Emulator8086() {
         
         // 5. LEA r16, m (0x8D)
         if (op === 0x8D) {
-            const m = modrmDec(true);
+            const m = modrmDec();
             setReg16(m.reg, m.ea);
             return true;
         }
@@ -996,7 +1057,7 @@ export default function Emulator8086() {
         // XCHG r/m, r (0x86, 0x87)
         if (op === 0x86 || op === 0x87) {
             const isWord = op === 0x87;
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             const v1 = rmRd(m, isWord);
             const v2 = isWord ? getReg16(m.reg) : getReg8(m.reg);
             rmWr(m, isWord, v2);
@@ -1024,10 +1085,10 @@ export default function Emulator8086() {
             return true;
         }
         
-        // Nhóm lệnh F6 / F7 (TEST, NOT, NEG, MUL, IMUL, DIV, IDIV)
+        // F6 / F7 group (TEST, NOT, NEG, MUL, IMUL, DIV, IDIV)
         if (op === 0xF6 || op === 0xF7) {
             const isWord = op === 0xF7;
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             if (m.reg === 0 || m.reg === 1) { // TEST r/m, imm
                 const imm = isWord ? fetch16() : fetch8();
                 const v1 = rmRd(m, isWord);
@@ -1135,13 +1196,13 @@ export default function Emulator8086() {
             const isWord = op === 0xC1 || op === 0xD1 || op === 0xD3;
             const isCL = op === 0xD2 || op === 0xD3;
             const isImm = op === 0xC0 || op === 0xC1;
-            const m = modrmDec(isWord);
+            const m = modrmDec();
             
             let count = 1;
             if (isCL) count = e.reg.CX & 0xFF;
             else if (isImm) count = fetch8();
             
-            count &= 0x1F; // Mask bộ đếm xuống 5 bit (chuẩn của vi xử lý)
+            count &= 0x1F; // Mask shift count to 5 bits (hardware standard)
 
             if (count > 0) {
                 let val = rmRd(m, isWord);
@@ -1180,7 +1241,7 @@ export default function Emulator8086() {
                 }
                 rmWr(m, isWord, val);
                 
-                // Cập nhật Cờ (Flags)
+                // Update flags
                 updFlags(val, isWord);
                 e.flags.PF = calcParity(val);
             }
@@ -1228,8 +1289,39 @@ export default function Emulator8086() {
 
         if (op === 0xCD) {
             const iNum = fetch8();
-            if (iNum === 0x10 && ((e.reg.AX>>8)&0xFF) === 0x0E) writeToVGA(e, String.fromCharCode(e.reg.AX & 0xFF));
-            else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
+            if (iNum === 0x10) {
+                const ah = (e.reg.AX >> 8) & 0xFF;
+                if (ah === 0x0E) { // TTY character output
+                    writeToVGA(e, String.fromCharCode(e.reg.AX & 0xFF));
+                } else if (ah === 0x00) { // Set video mode: clear screen
+                    e.mem.fill(0, VGA_BASE, VGA_BASE + VGA_COLS * VGA_ROWS * 2);
+                    e.cursRow = 0; e.cursCol = 0;
+                } else if (ah === 0x02) { // Set cursor position: DH=row, DL=col
+                    e.cursRow = (e.reg.DX >> 8) & 0xFF; e.cursCol = e.reg.DX & 0xFF;
+                } else if (ah === 0x06) { // Scroll up / clear window
+                    e.mem.fill(0, VGA_BASE, VGA_BASE + VGA_COLS * VGA_ROWS * 2);
+                    e.cursRow = 0; e.cursCol = 0;
+                } else if (ah === 0x09) { // Write character + attribute: AL=char, BL=attr, CX=count
+                    const ch = e.reg.AX & 0xFF; const attr = e.reg.BX & 0xFF; const count = e.reg.CX & 0xFFFF;
+                    for (let i = 0; i < count; i++) {
+                        const pos = (e.cursRow * VGA_COLS + e.cursCol + i) * 2;
+                        if (VGA_BASE + pos + 1 < MEM_SIZE) { e.mem[VGA_BASE + pos] = ch; e.mem[VGA_BASE + pos + 1] = attr; }
+                    }
+                }
+            } else if (iNum === 0x21) {
+                const ah = (e.reg.AX >> 8) & 0xFF;
+                if (ah === 0x02) { // Write character to stdout: DL=char
+                    writeToVGA(e, String.fromCharCode(e.reg.DX & 0xFF));
+                } else if (ah === 0x09) { // Write $-terminated string: DS:DX=string
+                    let addr = calcPhys(e.reg.DS, e.reg.DX);
+                    while (addr < MEM_SIZE && e.mem[addr] !== 0x24) { writeToVGA(e, String.fromCharCode(e.mem[addr++])); }
+                } else if (ah === 0x4C) { // Exit program
+                    return false;
+                }
+            } else {
+                push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP);
+                e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2));
+            }
             return true;
         }
 
@@ -1286,7 +1378,7 @@ export default function Emulator8086() {
                     if (repPrefix === 0xF3) repeat = repeat && (e.flags.ZF === 1); // REPE/REPZ
                     if (repPrefix === 0xF2) repeat = repeat && (e.flags.ZF === 0); // REPNE/REPNZ
                 }
-                if (repeat) e.reg.IP = opIP; // Lặp lại lệnh (quay về prefix)
+                if (repeat) e.reg.IP = opIP; // Repeat instruction (go back to prefix)
             } else {
                 doStringOp();
             }
@@ -1296,7 +1388,7 @@ export default function Emulator8086() {
         throw new Error(`X86 BINARY ERROR: Unsupported Opcode 0x${op.toString(16).toUpperCase()} at ${toHex(e.reg.CS)}:${toHex(opIP)}`);
     };
 
-    // Bộ định tuyến Engine
+    // Engine router
     const executeStep = () => {
         if (execMode === "BIN") return executeBinaryStep();
         else return executeAstStep();
@@ -1312,9 +1404,10 @@ export default function Emulator8086() {
         try { for (let i = 0; i < 20; i++) { if (!executeStep()) { ok = false; break; } } } 
         catch (ex) { setErrorMessage(ex.message); ok = false; }
         forceRender();
+        // eslint-disable-next-line react-hooks/immutability
         if (ok) requestRef.current = requestAnimationFrame(runLoop);
         else { setIsRunning(false); isRunningRef.current = false; }
-    }, [execMode]);
+    }, [execMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleRun = () => {
         if (isRunning) {
@@ -1327,7 +1420,7 @@ export default function Emulator8086() {
     };
 
     const assemble = () => {
-        setExecMode("AST"); // Bật lại Mode Interpreter
+        setExecMode("AST"); // Switch to AST Interpreter mode
         resetCPU();
         const e = eng.current;
         const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
@@ -1356,10 +1449,10 @@ export default function Emulator8086() {
         const e = eng.current;
         if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
         resetCPU();
-        for (let i = 0; i < 512; i++) e.mem[0x7C00 + i] = e.disk[i];
-        e.reg.IP = 0x7C00; e.reg.CS = 0x0000;
-        setExecMode("BIN"); // Khởi động từ Disk là chạy mã nhị phân thực thụ
-        addLog("BIOS: Booting from disk (Hardware Mode) at 0x7C00...");
+        for (let i = 0; i < 512; i++) e.mem[BOOT_LOAD_ADDR + i] = e.disk[i];
+        e.reg.IP = BOOT_LOAD_ADDR; e.reg.CS = 0x0000;
+        setExecMode("BIN"); // Booting from disk runs real binary machine code
+        addLog(`BIOS: Booting from disk (Hardware Mode) at ${toHex(BOOT_LOAD_ADDR)}...`);
         setIsAssembled(true); setIsRunning(true); isRunningRef.current = true;
         requestRef.current = requestAnimationFrame(runLoop);
     };
@@ -1388,8 +1481,9 @@ export default function Emulator8086() {
                 />
 
                 {errorMessage && (
-                    <div className="bg-red-950/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg shadow-lg flex">
-                        <p className="font-bold mr-2">SYSTEM HALT:</p> {errorMessage}
+                    <div className="bg-red-950/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg shadow-lg flex justify-between items-start">
+                        <div className="flex"><p className="font-bold mr-2">SYSTEM HALT:</p> {errorMessage}</div>
+                        <button onClick={() => setErrorMessage(null)} className="ml-4 text-red-400 hover:text-red-200 font-bold text-sm shrink-0" title="Dismiss">✕</button>
                     </div>
                 )}
 
