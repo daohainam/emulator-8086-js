@@ -794,6 +794,33 @@ export default function Emulator8086() {
             }
             case "CBW": r.AX = (r.AX & 0x80) ? (0xFF00 | (r.AX & 0xFF)) : (r.AX & 0xFF); break;
             case "CWD": r.DX = (r.AX & 0x8000) ? 0xFFFF : 0x0000; break;
+            case "SAHF": {
+                const ah = (r.AX >> 8) & 0xFF;
+                f.CF = (ah & 1) ? 1 : 0; f.PF = (ah & 4) ? 1 : 0; f.AF = (ah & 16) ? 1 : 0; f.ZF = (ah & 64) ? 1 : 0; f.SF = (ah & 128) ? 1 : 0;
+                break;
+            }
+            case "LAHF": {
+                let ah = 2; if (f.CF) ah |= 1; if (f.PF) ah |= 4; if (f.AF) ah |= 16; if (f.ZF) ah |= 64; if (f.SF) ah |= 128;
+                r.AX = (r.AX & 0x00FF) | (ah << 8);
+                break;
+            }
+            case "XLAT": case "XLATB": {
+                const phys = calcPhys(r.DS, (r.BX + (r.AX & 0xFF)) & 0xFFFF);
+                r.AX = (r.AX & 0xFF00) | readMem8(e, phys);
+                break;
+            }
+            case "LDS": case "LES": {
+                let segReg = r.DS; if (args[1].includes("ES:")) segReg = r.ES;
+                const innerMatch = args[1].match(/\[(.*)\]/);
+                if (innerMatch) {
+                    const phys = calcPhys(segReg, resolveOffset(e, innerMatch[1]));
+                    const off = readMemWord(e, phys);
+                    const seg = readMemWord(e, (phys + 2) & 0xFFFFF);
+                    writeOpVal(e, args[0], off);
+                    if (op === "LDS") r.DS = seg; else r.ES = seg;
+                }
+                break;
+            }
             case "PUSHA": { const sp = r.SP; push16(e, r.AX); push16(e, r.CX); push16(e, r.DX); push16(e, r.BX); push16(e, sp); push16(e, r.BP); push16(e, r.SI); push16(e, r.DI); break; }
             case "POPA": { r.DI = pop16(e); r.SI = pop16(e); r.BP = pop16(e); pop16(e); r.BX = pop16(e); r.DX = pop16(e); r.CX = pop16(e); r.AX = pop16(e); break; }
             case "LEAVE": { r.SP = r.BP; r.BP = pop16(e); break; }
@@ -977,6 +1004,7 @@ export default function Emulator8086() {
         if (op === 0x88) { const m = modrmDec(false); rmWr(m, false, getReg8(m.reg)); return true; } // MOV r/m8, r8
         if (op === 0xC7) { const m = modrmDec(true); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
         if (op === 0xC6) { const m = modrmDec(false); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
+        if (op === 0xC4 || op === 0xC5) { const m = modrmDec(true); if (m.mod===3) throw new Error("LDS/LES needs mem"); const off=readMemWord(e, m.addr); const seg=readMemWord(e, (m.addr+2)&0xFFFFF); setReg16(m.reg, off); if(op===0xC4) e.reg.ES=seg; else e.reg.DS=seg; return true; }
 
         if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const orig=getReg16(r); const v=(orig+1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.PF=calcParity(v); return true; } // INC r16
         if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const orig=getReg16(r); const v=(orig-1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x8000?1:0; e.flags.PF=calcParity(v); return true; } // DEC r16
@@ -1187,6 +1215,9 @@ export default function Emulator8086() {
         if (op === 0x9D) { unpackFlags(e, pop16(e)); return true; }
         if (op === 0x98) { e.reg.AX = (e.reg.AX & 0x80) ? (0xFF00 | (e.reg.AX & 0xFF)) : (e.reg.AX & 0xFF); return true; } 
         if (op === 0x99) { e.reg.DX = (e.reg.AX & 0x8000) ? 0xFFFF : 0x0000; return true; } 
+        if (op === 0x9E) { const ah = (e.reg.AX >> 8) & 0xFF; e.flags.CF=(ah&1)?1:0; e.flags.PF=(ah&4)?1:0; e.flags.AF=(ah&16)?1:0; e.flags.ZF=(ah&64)?1:0; e.flags.SF=(ah&128)?1:0; return true; } // SAHF
+        if (op === 0x9F) { let ah=2; if(e.flags.CF)ah|=1; if(e.flags.PF)ah|=4; if(e.flags.AF)ah|=16; if(e.flags.ZF)ah|=64; if(e.flags.SF)ah|=128; e.reg.AX=(e.reg.AX&0xFF)|(ah<<8); return true; } // LAHF
+        if (op === 0xD7) { const phys = calcPhys(segOv !== null ? segOv : e.reg.DS, (e.reg.BX + (e.reg.AX & 0xFF)) & 0xFFFF); e.reg.AX = (e.reg.AX & 0xFF00) | readMem8(e, phys); return true; } // XLAT
 
         if (op === 0xE4 || op === 0xE5) { 
             const isWord = op === 0xE5; const port = fetch8(); const val = e.ioPorts[port] || 0;
@@ -1241,7 +1272,10 @@ export default function Emulator8086() {
         if (op === 0xE8) { const off = fetch16(); push16(e, e.reg.IP); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } 
         if (op === 0xE9) { const off = fetch16(); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } 
         if (op === 0xEB) { const off = fetch8()<<24>>24; e.reg.IP = (e.reg.IP + off) & 0xFFFF; return true; } 
+        if (op === 0xE0) { const off = fetch8()<<24>>24; e.reg.CX=(e.reg.CX-1)&0xFFFF; if (e.reg.CX!==0 && e.flags.ZF===0) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } // LOOPNE/LOOPNZ
+        if (op === 0xE1) { const off = fetch8()<<24>>24; e.reg.CX=(e.reg.CX-1)&0xFFFF; if (e.reg.CX!==0 && e.flags.ZF===1) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } // LOOPE/LOOPZ
         if (op === 0xE2) { const off = fetch8()<<24>>24; e.reg.CX=(e.reg.CX-1)&0xFFFF; if (e.reg.CX!==0) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } 
+        if (op === 0xE3) { const off = fetch8()<<24>>24; if (e.reg.CX===0) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } // JCXZ
         if (op === 0xC3) { e.reg.IP = pop16(e); return true; } 
         if (op === 0xC2) { const bytes = fetch16(); e.reg.IP = pop16(e); e.reg.SP = (e.reg.SP + bytes) & 0xFFFF; return true; } 
         if (op === 0xCB) { e.reg.IP = pop16(e); e.reg.CS = pop16(e); return true; } 
