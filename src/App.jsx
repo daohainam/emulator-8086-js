@@ -8,6 +8,25 @@ const DOS_COLORS = [
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
+// --- HARDWARE CONSTANTS ---
+const ADDR_SPACE     = 1048576; // Total address space (1 MB)
+const RAM_SIZE       = 65536;   // Main RAM size (64 KB)
+const DISK_SIZE      = 65536;   // Virtual disk size (64 KB)
+const SECTOR_SIZE    = 512;     // Standard disk sector size
+
+const VGA_BASE       = 0xB8000; // VGA text mode VRAM base address
+const VGA_COLS       = 80;      // VGA text mode columns
+const VGA_ROWS       = 25;      // VGA text mode rows
+const VGA_SIZE       = VGA_COLS * VGA_ROWS * 2; // 4000 Bytes
+
+const BIOS_BASE      = 0xF0000; // BIOS ROM base address
+const BIOS_SIZE      = 32768;   // BIOS ROM size (32 KB)
+
+const BOOT_LOAD_ADDR = 0x7C00;  // BIOS boot sector load address
+const INITIAL_SP     = 0xFFFE;  // Initial stack pointer value
+const PC_TIMER_FREQ  = 1193182; // PC Timer base frequency in Hz (1.193182 MHz)
+const KBD_BUF_ADDR   = 0x0400;  // BIOS keyboard buffer address
+
 const DEFAULT_CODE = `; --- DEMO: MULTICOLOR HELLO 8086 ---
 MOV AX, 0x0000
 MOV DS, AX
@@ -41,7 +60,7 @@ LOOP PRINT_LOOP
 HLT`;
 
 const toHex = (n, pad = 4) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
-const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & 0xFFFFF;
+const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & (ADDR_SPACE - 1);
 const calcParity = (val) => {
     let p = 0, v = val & 0xFF;
     while (v) { p ^= (v & 1); v >>= 1; }
@@ -157,22 +176,22 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
 }
 
 function VGAMonitor({ vga, cs, ip }) {
-    if (!vga) return null; // Safe check
+    if (!vga) return null; 
     
     return (
         <div className="bg-slate-800 p-2 rounded-xl border-4 border-slate-700 shadow-2xl flex flex-col items-center overflow-x-auto">
             <div className="w-full flex justify-between mb-2 px-2 text-[10px] text-slate-400 font-bold min-w-max">
-                <span>VGA 80x25 TEXT MODE</span>
+                <span>VGA {VGA_COLS}x{VGA_ROWS} TEXT MODE</span>
                 <div className="flex space-x-2">
                      <span className="text-blue-400">CS: {toHex(cs)}</span>
                      <span className="text-amber-400">IP: {toHex(ip)}</span>
                 </div>
             </div>
             <div className="bg-black p-2 rounded border border-slate-900 font-mono text-[11px] leading-none whitespace-pre select-none ring-2 ring-black">
-                {Array.from({ length: 25 }).map((_, y) => (
+                {Array.from({ length: VGA_ROWS }).map((_, y) => (
                     <div key={y} className="flex h-[1.1em]">
-                        {Array.from({ length: 80 }).map((_, x) => {
-                            const offset = (y * 80 + x) * 2;
+                        {Array.from({ length: VGA_COLS }).map((_, x) => {
+                            const offset = (y * VGA_COLS + x) * 2;
                             const charCode = vga[offset] || 0;
                             const attr = vga[offset + 1] || 0x07;
                             const fg = DOS_COLORS[attr & 0x0F];
@@ -252,7 +271,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
         
         for (let c = 0; c < 16; c++) {
             const addr = rowPhys + c;
-            const val = getMemByte && getMemByte(addr); // Safe call
+            const val = getMemByte && getMemByte(addr); 
             
             if (val !== null && val !== undefined) {
                 bytes.push(
@@ -399,12 +418,12 @@ export default function Emulator8086() {
     const oscRef = useRef(null);
 
     const eng = useRef({
-        reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: 0xFFFE, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
+        reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(65536),   // 64KB RAM Chính (0x00000 - 0x0FFFF)
-        vga: new Uint8Array(4000),    // 4000 Bytes Video RAM (0xB8000 - 0xB8FA0)
-        bios: new Uint8Array(32768),  // 32KB BIOS RAM (0xF0000 - 0xF7FFF)
-        disk: new Uint8Array(65536),
+        mem: new Uint8Array(RAM_SIZE),   
+        vga: new Uint8Array(VGA_SIZE),   
+        bios: new Uint8Array(BIOS_SIZE), 
+        disk: new Uint8Array(DISK_SIZE),
         ioPorts: {},
         insts: [],
         labels: {},
@@ -421,16 +440,16 @@ export default function Emulator8086() {
     // CORE: MEMORY MANAGER (BOUNDS CHECKING)
     // ===============================================
     const readMem8 = (e, phys) => {
-        if (phys < 65536) return e.mem[phys];
-        if (phys >= 0xB8000 && phys < 0xB8FA0) return e.vga[phys - 0xB8000];
-        if (phys >= 0xF0000 && phys < 0xF8000) return e.bios[phys - 0xF0000];
+        if (phys < RAM_SIZE) return e.mem[phys];
+        if (phys >= VGA_BASE && phys < VGA_BASE + VGA_SIZE) return e.vga[phys - VGA_BASE];
+        if (phys >= BIOS_BASE && phys < BIOS_BASE + BIOS_SIZE) return e.bios[phys - BIOS_BASE];
         throw new Error(`Memory Access Violation: Read at ${toHex(phys, 5)}`);
     };
 
     const writeMem8 = (e, phys, val) => {
-        if (phys < 65536) { e.mem[phys] = val & 0xFF; return; }
-        if (phys >= 0xB8000 && phys < 0xB8FA0) { e.vga[phys - 0xB8000] = val & 0xFF; return; }
-        if (phys >= 0xF0000 && phys < 0xF8000) { e.bios[phys - 0xF0000] = val & 0xFF; return; }
+        if (phys < RAM_SIZE) { e.mem[phys] = val & 0xFF; return; }
+        if (phys >= VGA_BASE && phys < VGA_BASE + VGA_SIZE) { e.vga[phys - VGA_BASE] = val & 0xFF; return; }
+        if (phys >= BIOS_BASE && phys < BIOS_BASE + BIOS_SIZE) { e.bios[phys - BIOS_BASE] = val & 0xFF; return; }
         throw new Error(`Memory Access Violation: Write to ${toHex(phys, 5)}`);
     };
 
@@ -440,18 +459,18 @@ export default function Emulator8086() {
     const pop16 = (e) => { const val = readMemWord(e, calcPhys(e.reg.SS, e.reg.SP)); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
 
     const getMemByteSafe = (phys) => {
-        if (phys < 65536) return eng.current.mem[phys];
-        if (phys >= 0xB8000 && phys < 0xB8FA0) return eng.current.vga[phys - 0xB8000];
-        if (phys >= 0xF0000 && phys < 0xF8000) return eng.current.bios[phys - 0xF0000];
+        if (phys < RAM_SIZE) return eng.current.mem[phys];
+        if (phys >= VGA_BASE && phys < VGA_BASE + VGA_SIZE) return eng.current.vga[phys - VGA_BASE];
+        if (phys >= BIOS_BASE && phys < BIOS_BASE + BIOS_SIZE) return eng.current.bios[phys - BIOS_BASE];
         return null; // Return null for Unmapped Memory
     };
 
     const handleMemoryChange = (addr, valStr) => {
         let val = parseInt(valStr, 16);
         if (isNaN(val)) val = 0;
-        if (addr < 65536) eng.current.mem[addr] = val & 0xFF;
-        else if (addr >= 0xB8000 && addr < 0xB8FA0) eng.current.vga[addr - 0xB8000] = val & 0xFF;
-        else if (addr >= 0xF0000 && addr < 0xF8000) eng.current.bios[addr - 0xF0000] = val & 0xFF;
+        if (addr < RAM_SIZE) eng.current.mem[addr] = val & 0xFF;
+        else if (addr >= VGA_BASE && addr < VGA_BASE + VGA_SIZE) eng.current.vga[addr - VGA_BASE] = val & 0xFF;
+        else if (addr >= BIOS_BASE && addr < BIOS_BASE + BIOS_SIZE) eng.current.bios[addr - BIOS_BASE] = val & 0xFF;
         forceRender();
     };
 
@@ -459,9 +478,9 @@ export default function Emulator8086() {
         const e = eng.current;
         for (let i = 0; i < data.length; i++) {
             const addr = startAddr + i;
-            if (addr < 65536) e.mem[addr] = data[i];
-            else if (addr >= 0xB8000 && addr < 0xB8FA0) e.vga[addr - 0xB8000] = data[i];
-            else if (addr >= 0xF0000 && addr < 0xF8000) e.bios[addr - 0xF0000] = data[i];
+            if (addr < RAM_SIZE) e.mem[addr] = data[i];
+            else if (addr >= VGA_BASE && addr < VGA_BASE + VGA_SIZE) e.vga[addr - VGA_BASE] = data[i];
+            else if (addr >= BIOS_BASE && addr < BIOS_BASE + BIOS_SIZE) e.bios[addr - BIOS_BASE] = data[i];
             else break; // Dừng nếu chép dữ liệu vượt ranh giới hợp lệ
         }
         addLog(`Loaded ${data.length} bytes from ${filename} to ${toHex(startAddr, 5)}`);
@@ -482,7 +501,7 @@ export default function Emulator8086() {
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = 0xFFFE;
+        e.reg.SP = INITIAL_SP;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         if (!keepMemory) { e.mem.fill(0); e.vga.fill(0); e.bios.fill(0); } 
@@ -493,7 +512,7 @@ export default function Emulator8086() {
     const resetCPU = () => {
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = 0xFFFE;
+        e.reg.SP = INITIAL_SP;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         if (!keepMemory) { e.mem.fill(0); e.vga.fill(0); e.bios.fill(0); }
         e.ioPorts = {};
@@ -532,7 +551,7 @@ export default function Emulator8086() {
 
     const handleKeyDown = (e) => {
         if (e.key.length === 1) {
-            writeMem8(eng.current, 0x0400, e.key.charCodeAt(0));
+            writeMem8(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
             eng.current.ioPorts[0x60] = e.key.charCodeAt(0);
             forceRender();
         }
@@ -548,7 +567,7 @@ export default function Emulator8086() {
         }
         if (port === 0x42) {
             if (!e.t2High) { e.t2Div = val; e.t2High = true; }
-            else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = 1193182 / e.t2Div; }
+            else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = PC_TIMER_FREQ / e.t2Div; }
         }
         if (port === 0x61) {
             const enable = (val & 0x03) === 0x03;
@@ -571,7 +590,7 @@ export default function Emulator8086() {
         f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
     };
     const writeToVGA = (e, c) => {
-        for (let i = 0; i < 2000; i++) {
+        for (let i = 0; i < VGA_COLS * VGA_ROWS; i++) {
             if (e.vga[i * 2] === 0) { e.vga[i * 2] = c.charCodeAt(0); e.vga[i * 2 + 1] = 0x07; break; }
         }
     };
@@ -1305,12 +1324,12 @@ export default function Emulator8086() {
 
     const bootFromDisk = () => {
         const e = eng.current;
-        if (e.disk[510] !== 0x55 || e.disk[511] !== 0xAA) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
+        if (e.disk[SECTOR_SIZE - 2] !== 0x55 || e.disk[SECTOR_SIZE - 1] !== 0xAA) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
         resetCPU();
-        for (let i = 0; i < 512; i++) e.mem[0x7C00 + i] = e.disk[i];
-        e.reg.IP = 0x7C00; e.reg.CS = 0x0000;
+        for (let i = 0; i < SECTOR_SIZE; i++) e.mem[BOOT_LOAD_ADDR + i] = e.disk[i];
+        e.reg.IP = BOOT_LOAD_ADDR; e.reg.CS = 0x0000;
         setExecMode("BIN"); // Khởi động từ Disk là chạy mã nhị phân thực thụ
-        addLog("BIOS: Booting from disk (Hardware Mode) at 0x7C00...");
+        addLog(`BIOS: Booting from disk (Hardware Mode) at ${toHex(BOOT_LOAD_ADDR, 4)}...`);
         setIsAssembled(true); setIsRunning(true); isRunningRef.current = true;
         requestRef.current = requestAnimationFrame(runLoop);
     };
@@ -1320,7 +1339,7 @@ export default function Emulator8086() {
     }, []);
 
     const e = eng.current;
-    const hasBootSig = e.disk[510] === 0x55 && e.disk[511] === 0xAA;
+    const hasBootSig = e.disk[SECTOR_SIZE - 2] === 0x55 && e.disk[SECTOR_SIZE - 1] === 0xAA;
     
     let activeLine = -1;
     if (execMode === "AST" && isAssembled && e.reg.IP < e.insts.length) {
