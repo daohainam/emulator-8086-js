@@ -647,24 +647,29 @@ export default function Emulator8086() {
             case "ADD": case "ADC": case "SUB": case "SBB": case "CMP": case "AND": case "OR": case "XOR": case "TEST": {
                 const v1 = getOpVal(e, args[0]); const v2 = getOpVal(e, args[1]);
                 const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                const signBit = is8 ? 0x80 : 0x8000;
                 let res = 0;
-                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; }
-                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; }
-                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; }
-                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; }
+                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; f.OF = ((v1 ^ res) & (v2 ^ res) & signBit) ? 1 : 0; }
+                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; f.OF = ((v1 ^ res) & (v2 ^ res) & signBit) ? 1 : 0; }
+                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; f.OF = ((v1 ^ v2) & (v1 ^ res) & signBit) ? 1 : 0; }
+                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; f.OF = ((v1 ^ v2) & (v1 ^ res) & signBit) ? 1 : 0; }
                 else if (op === "AND" || op === "TEST") { res = v1 & v2; f.CF = 0; f.OF = 0; }
                 else if (op === "OR") { res = v1 | v2; f.CF = 0; f.OF = 0; }
                 else if (op === "XOR") { res = v1 ^ v2; f.CF = 0; f.OF = 0; }
 
                 if (op !== "CMP" && op !== "TEST") writeOpVal(e, args[0], res);
-                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(res);
+                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & signBit) ? 1 : 0; f.PF = calcParity(res);
                 break;
             }
             case "INC": case "DEC": { 
                 const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                const v = op === "INC" ? getOpVal(e, args[0]) + 1 : getOpVal(e, args[0]) - 1; 
+                const signBit = is8 ? 0x80 : 0x8000;
+                const orig = getOpVal(e, args[0]);
+                const v = op === "INC" ? orig + 1 : orig - 1; 
                 writeOpVal(e, args[0], v); 
-                f.ZF = (v & mask) === 0 ? 1 : 0; f.SF = (v & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(v);
+                f.ZF = (v & mask) === 0 ? 1 : 0; f.SF = (v & signBit) ? 1 : 0; f.PF = calcParity(v);
+                if (op === "INC") f.OF = orig === (is8 ? 0x7F : 0x7FFF) ? 1 : 0;
+                else f.OF = orig === (is8 ? 0x80 : 0x8000) ? 1 : 0;
                 break; 
             }
             case "NOT": {
@@ -905,12 +910,18 @@ export default function Emulator8086() {
         if (op === 0xC7) { const m = modrmDec(true); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
         if (op === 0xC6) { const m = modrmDec(false); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
 
-        if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const v=(getReg16(r)+1)&0xFFFF; setReg16(r,v); updFlags(v,true); return true; } // INC r16
-        if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const v=(getReg16(r)-1)&0xFFFF; setReg16(r,v); updFlags(v,true); return true; } // DEC r16
-        if (op === 0xFE) { const m=modrmDec(false); const v=rmRd(m,false); const res=m.reg===0?v+1:v-1; rmWr(m,false,res); updFlags(res,false); return true; } // INC/DEC r/m8
+        if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const orig=getReg16(r); const v=(orig+1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.PF=calcParity(v); return true; } // INC r16
+        if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const orig=getReg16(r); const v=(orig-1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x8000?1:0; e.flags.PF=calcParity(v); return true; } // DEC r16
+        if (op === 0xFE) { 
+            const m=modrmDec(false); const orig=rmRd(m,false); 
+            if (m.reg===0) { const res=orig+1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x7F?1:0; e.flags.PF=calcParity(res); }
+            else if (m.reg===1) { const res=orig-1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x80?1:0; e.flags.PF=calcParity(res); }
+            return true; 
+        }
         if (op === 0xFF) { 
             const m=modrmDec(true); 
-            if(m.reg===0||m.reg===1){ const v=rmRd(m,true); const res=m.reg===0?v+1:v-1; rmWr(m,true,res); updFlags(res,true); }
+            if(m.reg===0) { const orig=rmRd(m,true); const res=orig+1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.PF=calcParity(res); }
+            else if(m.reg===1) { const orig=rmRd(m,true); const res=orig-1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x8000?1:0; e.flags.PF=calcParity(res); }
             else if(m.reg===2||m.reg===4){ if(m.reg===2) push16(e, e.reg.IP); e.reg.IP=rmRd(m,true); }
             else if(m.reg===6) push16(e, rmRd(m,true));
             return true;
@@ -930,6 +941,7 @@ export default function Emulator8086() {
             const aluOp = (op >> 3) & 7;
             const isWord = (op & 1) === 1;
             const dir = (op & 2) !== 0; 
+            const signBit = isWord ? 0x8000 : 0x80;
             const m = modrmDec(isWord);
             const rmVal = rmRd(m, isWord);
             const regVal = isWord ? getReg16(m.reg) : getReg8(m.reg);
@@ -938,12 +950,12 @@ export default function Emulator8086() {
             const src = dir ? rmVal : regVal;
             
             let res = 0;
-            if (aluOp===0) { res = dst + src; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + src; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (src ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===1) { res = dst | src; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (src ^ res) & signBit) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ src) & (dst ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===4) { res = dst & src; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; } 
+            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; e.flags.OF = ((dst ^ src) & (dst ^ res) & signBit) ? 1 : 0; } 
             else if (aluOp===6) { res = dst ^ src; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -959,16 +971,17 @@ export default function Emulator8086() {
         if (isALUAcc) {
             const aluOp = (op >> 3) & 7;
             const isWord = (op & 1) === 1;
+            const signBit = isWord ? 0x8000 : 0x80;
             const imm = isWord ? fetch16() : fetch8();
             const dst = isWord ? getReg16(0) : getReg8(0);
             
             let res = 0;
-            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; }
+            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -978,6 +991,7 @@ export default function Emulator8086() {
 
         if (op >= 0x80 && op <= 0x83) {
             const isWord = op === 0x81 || op === 0x83;
+            const signBit = isWord ? 0x8000 : 0x80;
             const m = modrmDec(isWord);
             let imm = fetch8();
             if (op === 0x81) { const hi = fetch8(); imm = (hi << 8) | imm; } 
@@ -986,12 +1000,12 @@ export default function Emulator8086() {
             const aluOp = m.reg;
             
             let res = 0;
-            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
+            if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
-            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; }
+            else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
+            else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; }
+            else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
             else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
