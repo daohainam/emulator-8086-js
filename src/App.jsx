@@ -9,7 +9,7 @@ const DOS_COLORS = [
 ];
 
 const DEFAULT_CODE = `; --- DEMO: MULTICOLOR HELLO 8086 ---
-MOV AX, 0x1000
+MOV AX, 0x0000
 MOV DS, AX
 
 ; Store string and colors in RAM (Data Segment)
@@ -62,7 +62,7 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
                 <div>
                     <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
                     <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-                        Full ISA | Engine: 
+                        64KB RAM | 32KB BIOS | Engine: 
                         <span className={`ml-1 ${execMode === 'BIN' ? 'text-fuchsia-400 font-bold' : 'text-indigo-400 font-bold'}`}>
                             {execMode === 'BIN' ? 'X86 HARDWARE' : 'AST INTERPRETER'}
                         </span>
@@ -140,7 +140,6 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
                     spellCheck="false" 
                 />
                 
-                {/* Lớp Overlay khóa giao diện báo hiệu Hardware Mode */}
                 {execMode === 'BIN' && (
                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-[2px] pointer-events-none transition-all duration-300">
                         <div className="bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-400 px-5 py-4 rounded-xl shadow-2xl flex items-center space-x-3">
@@ -157,7 +156,9 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
     );
 }
 
-function VGAMonitor({ memory, cs, ip }) {
+function VGAMonitor({ vga, cs, ip }) {
+    if (!vga) return null; // Safe check
+    
     return (
         <div className="bg-slate-800 p-2 rounded-xl border-4 border-slate-700 shadow-2xl flex flex-col items-center overflow-x-auto">
             <div className="w-full flex justify-between mb-2 px-2 text-[10px] text-slate-400 font-bold min-w-max">
@@ -172,8 +173,8 @@ function VGAMonitor({ memory, cs, ip }) {
                     <div key={y} className="flex h-[1.1em]">
                         {Array.from({ length: 80 }).map((_, x) => {
                             const offset = (y * 80 + x) * 2;
-                            const charCode = memory[0xB8000 + offset];
-                            const attr = memory[0xB8000 + offset + 1] || 0x07;
+                            const charCode = vga[offset] || 0;
+                            const attr = vga[offset + 1] || 0x07;
                             const fg = DOS_COLORS[attr & 0x0F];
                             const bg = DOS_COLORS[(attr >> 4) & 0x0F];
                             const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
@@ -214,7 +215,7 @@ function DiskViewer({ diskMemory }) {
     );
 }
 
-function MemoryViewer({ title = "Memory View", memory, memSegStr, setMemSegStr, memOffStr, setMemOffStr, hasToggle = false, isToggled = false, onToggle, onMemoryChange, isRunning, onLoadMemory }) {
+function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegStr, memOffStr, setMemOffStr, hasToggle = false, isToggled = false, onToggle, onMemoryChange, isRunning, onLoadMemory }) {
     const seg = parseInt(memSegStr.replace(/0x/i, ''), 16) || 0;
     const off = parseInt(memOffStr.replace(/0x/i, ''), 16) || 0;
 
@@ -251,8 +252,9 @@ function MemoryViewer({ title = "Memory View", memory, memSegStr, setMemSegStr, 
         
         for (let c = 0; c < 16; c++) {
             const addr = rowPhys + c;
-            if (addr < 1048576) {
-                const val = memory[addr];
+            const val = getMemByte && getMemByte(addr); // Safe call
+            
+            if (val !== null && val !== undefined) {
                 bytes.push(
                     <input
                         key={`${addr}-${val}`}
@@ -268,7 +270,7 @@ function MemoryViewer({ title = "Memory View", memory, memSegStr, setMemSegStr, 
                 );
                 chars.push((val >= 32 && val <= 126) ? String.fromCharCode(val) : '.');
             } else {
-                bytes.push(<span key={c} className="text-slate-800 w-[2ch] inline-block text-center">00</span>);
+                bytes.push(<span key={c} className="text-red-900/50 w-[2ch] inline-block text-center select-none font-bold">--</span>);
                 chars.push('.');
             }
         }
@@ -347,7 +349,6 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
             </div>
             
             <div className="mt-2 text-[11px] font-mono text-center text-fuchsia-400 bg-slate-950/80 py-1 rounded border border-slate-800">
-                {/* Fixed the packFlags function call by passing the required 'e' parameter */}
                 {packFlags(e).toString(2).padStart(16, '0').replace(/(.{4})/g, '$1 ').trim()}
             </div>
             
@@ -379,8 +380,6 @@ export default function Emulator8086() {
     const [isRunning, setIsRunning] = useState(false);
     const [isAssembled, setIsAssembled] = useState(false);
     const [keepMemory, setKeepMemory] = useState(false);
-    
-    // Quản lý chế độ Engine: AST (Interpreter từ Editor) hoặc BIN (Hardware x86 Decode từ RAM)
     const [execMode, setExecMode] = useState("AST"); 
 
     const [orgOffset, setOrgOffset] = useState("0x1000"); 
@@ -402,7 +401,9 @@ export default function Emulator8086() {
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: 0xFFFE, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(1048576),
+        mem: new Uint8Array(65536),   // 64KB RAM Chính (0x00000 - 0x0FFFF)
+        vga: new Uint8Array(4000),    // 4000 Bytes Video RAM (0xB8000 - 0xB8FA0)
+        bios: new Uint8Array(32768),  // 32KB BIOS RAM (0xF0000 - 0xF7FFF)
         disk: new Uint8Array(65536),
         ioPorts: {},
         insts: [],
@@ -416,27 +417,62 @@ export default function Emulator8086() {
 
     const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-20));
 
-    const handleRegChange = (reg, valStr) => {
-        let val = parseInt(valStr.replace(/0x/i, ''), 16);
-        if (isNaN(val)) val = 0;
-        eng.current.reg[reg] = val & 0xFFFF;
-        forceRender();
+    // ===============================================
+    // CORE: MEMORY MANAGER (BOUNDS CHECKING)
+    // ===============================================
+    const readMem8 = (e, phys) => {
+        if (phys < 65536) return e.mem[phys];
+        if (phys >= 0xB8000 && phys < 0xB8FA0) return e.vga[phys - 0xB8000];
+        if (phys >= 0xF0000 && phys < 0xF8000) return e.bios[phys - 0xF0000];
+        throw new Error(`Memory Access Violation: Read at ${toHex(phys, 5)}`);
+    };
+
+    const writeMem8 = (e, phys, val) => {
+        if (phys < 65536) { e.mem[phys] = val & 0xFF; return; }
+        if (phys >= 0xB8000 && phys < 0xB8FA0) { e.vga[phys - 0xB8000] = val & 0xFF; return; }
+        if (phys >= 0xF0000 && phys < 0xF8000) { e.bios[phys - 0xF0000] = val & 0xFF; return; }
+        throw new Error(`Memory Access Violation: Write to ${toHex(phys, 5)}`);
+    };
+
+    const readMemWord = (e, phys) => readMem8(e, phys) | (readMem8(e, phys + 1) << 8);
+    const writeMemWord = (e, phys, val) => { writeMem8(e, phys, val & 0xFF); writeMem8(e, phys + 1, (val >> 8) & 0xFF); };
+    const push16 = (e, val) => { e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeMemWord(e, calcPhys(e.reg.SS, e.reg.SP), val); };
+    const pop16 = (e) => { const val = readMemWord(e, calcPhys(e.reg.SS, e.reg.SP)); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
+
+    const getMemByteSafe = (phys) => {
+        if (phys < 65536) return eng.current.mem[phys];
+        if (phys >= 0xB8000 && phys < 0xB8FA0) return eng.current.vga[phys - 0xB8000];
+        if (phys >= 0xF0000 && phys < 0xF8000) return eng.current.bios[phys - 0xF0000];
+        return null; // Return null for Unmapped Memory
     };
 
     const handleMemoryChange = (addr, valStr) => {
         let val = parseInt(valStr, 16);
         if (isNaN(val)) val = 0;
-        eng.current.mem[addr] = val & 0xFF;
+        if (addr < 65536) eng.current.mem[addr] = val & 0xFF;
+        else if (addr >= 0xB8000 && addr < 0xB8FA0) eng.current.vga[addr - 0xB8000] = val & 0xFF;
+        else if (addr >= 0xF0000 && addr < 0xF8000) eng.current.bios[addr - 0xF0000] = val & 0xFF;
         forceRender();
     };
 
     const handleLoadMemory = (startAddr, data, filename) => {
         const e = eng.current;
         for (let i = 0; i < data.length; i++) {
-            if (startAddr + i < 1048576) e.mem[startAddr + i] = data[i];
+            const addr = startAddr + i;
+            if (addr < 65536) e.mem[addr] = data[i];
+            else if (addr >= 0xB8000 && addr < 0xB8FA0) e.vga[addr - 0xB8000] = data[i];
+            else if (addr >= 0xF0000 && addr < 0xF8000) e.bios[addr - 0xF0000] = data[i];
+            else break; // Dừng nếu chép dữ liệu vượt ranh giới hợp lệ
         }
         addLog(`Loaded ${data.length} bytes from ${filename} to ${toHex(startAddr, 5)}`);
-        setExecMode("BIN"); // Tự động bật chế độ Lõi nhị phân
+        setExecMode("BIN"); 
+        forceRender();
+    };
+
+    const handleRegChange = (reg, valStr) => {
+        let val = parseInt(valStr.replace(/0x/i, ''), 16);
+        if (isNaN(val)) val = 0;
+        eng.current.reg[reg] = val & 0xFFFF;
         forceRender();
     };
 
@@ -449,7 +485,7 @@ export default function Emulator8086() {
         e.reg.SP = 0xFFFE;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        if (!keepMemory) e.mem.fill(0); 
+        if (!keepMemory) { e.mem.fill(0); e.vga.fill(0); e.bios.fill(0); } 
         setErrorMessage(null);
         forceRender();
     };
@@ -459,7 +495,7 @@ export default function Emulator8086() {
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = 0xFFFE;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        if (!keepMemory) e.mem.fill(0);
+        if (!keepMemory) { e.mem.fill(0); e.vga.fill(0); e.bios.fill(0); }
         e.ioPorts = {};
         e.t2Div = 0;
         e.t2High = false;
@@ -496,20 +532,19 @@ export default function Emulator8086() {
 
     const handleKeyDown = (e) => {
         if (e.key.length === 1) {
-            eng.current.mem[0x0400] = e.key.charCodeAt(0);
+            writeMem8(eng.current, 0x0400, e.key.charCodeAt(0));
             eng.current.ioPorts[0x60] = e.key.charCodeAt(0);
             forceRender();
         }
     };
 
-    // Shared I/O Handler cho cả 2 Engine
     const handleOut = (port, val) => {
         const e = eng.current;
         if (port === 0x70) e.diskSectorSelect = val % 256;
         if (port === 0x71) {
             const rAddr = calcPhys(e.reg.DS, e.reg.BX); const dAddr = e.diskSectorSelect * 16;
-            if (val === 1) for(let i=0; i<16; i++) e.mem[rAddr + i] = e.disk[dAddr + i];
-            if (val === 2) for(let i=0; i<16; i++) e.disk[dAddr + i] = e.mem[rAddr + i];
+            if (val === 1) for(let i=0; i<16; i++) writeMem8(e, rAddr + i, e.disk[dAddr + i]);
+            if (val === 2) for(let i=0; i<16; i++) e.disk[dAddr + i] = readMem8(e, rAddr + i);
         }
         if (port === 0x42) {
             if (!e.t2High) { e.t2Div = val; e.t2High = true; }
@@ -522,11 +557,6 @@ export default function Emulator8086() {
         addLog(`OUT 0x${port.toString(16).toUpperCase()}: 0x${val.toString(16).toUpperCase()}`);
     };
 
-    // Hàm tiện ích bộ nhớ
-    const readMemWord = (e, phys) => (e.mem[phys + 1] << 8) | e.mem[phys];
-    const writeMemWord = (e, phys, val) => { e.mem[phys] = val & 0xFF; e.mem[phys + 1] = (val >> 8) & 0xFF; };
-    const push16 = (e, val) => { e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeMemWord(e, calcPhys(e.reg.SS, e.reg.SP), val); };
-    const pop16 = (e) => { const val = readMemWord(e, calcPhys(e.reg.SS, e.reg.SP)); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
     const packFlags = (e) => {
         const f = e.flags; let r = 0;
         if (f.CF) r |= (1<<0); if (f.PF) r |= (1<<2); if (f.AF) r |= (1<<4);
@@ -542,7 +572,7 @@ export default function Emulator8086() {
     };
     const writeToVGA = (e, c) => {
         for (let i = 0; i < 2000; i++) {
-            if (e.mem[0xB8000 + i * 2] === 0) { e.mem[0xB8000 + i * 2] = c.charCodeAt(0); e.mem[0xB8000 + i * 2 + 1] = 0x07; break; }
+            if (e.vga[i * 2] === 0) { e.vga[i * 2] = c.charCodeAt(0); e.vga[i * 2 + 1] = 0x07; break; }
         }
     };
 
@@ -566,7 +596,7 @@ export default function Emulator8086() {
             let seg = e.reg.DS; if (op.includes("ES:")) seg = e.reg.ES;
             const innerMatch = op.match(/\[(.*)\]/); if (!innerMatch) return 0;
             const phys = calcPhys(seg, resolveOffset(e, innerMatch[1]));
-            return op.includes("BYTE") ? e.mem[phys] : readMemWord(e, phys);
+            return op.includes("BYTE") ? readMem8(e, phys) : readMemWord(e, phys);
         }
         if (e.reg[op] !== undefined) return e.reg[op];
         if (op.startsWith("0X")) return parseInt(op, 16);
@@ -579,7 +609,7 @@ export default function Emulator8086() {
             let seg = e.reg.DS; if (dst.includes("ES:")) seg = e.reg.ES;
             const innerMatch = dst.match(/\[(.*)\]/); if (!innerMatch) return;
             const phys = calcPhys(seg, resolveOffset(e, innerMatch[1]));
-            if (dst.includes("BYTE")) e.mem[phys] = val & 0xFF; else writeMemWord(e, phys, val & 0xFFFF);
+            if (dst.includes("BYTE")) writeMem8(e, phys, val); else writeMemWord(e, phys, val & 0xFFFF);
         } else if (e.reg[dst] !== undefined) {
             e.reg[dst] = val & 0xFFFF;
         } else throw new Error(`Invalid destination: ${dst}`);
@@ -599,7 +629,6 @@ export default function Emulator8086() {
             prefix = op; op = args.length > 0 ? args[0].toUpperCase() : "NOP"; args = args.slice(1);
         }
         
-        // Helper nhận diện 8-bit hay 16-bit dựa trên tên toán hạng
         const is8Bit = (arg) => arg && (["AL","AH","BL","BH","CL","CH","DL","DH"].includes(arg.toUpperCase()) || arg.toUpperCase().includes("BYTE"));
 
         switch (op) {
@@ -740,25 +769,25 @@ export default function Emulator8086() {
                 const sz = isWord ? 2 : 1; const dir = f.DF === 0 ? sz : -sz;
                 if (op.startsWith("MOVS")) {
                     const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
-                    if (isWord) writeMemWord(e, d, readMemWord(e, s)); else e.mem[d] = e.mem[s];
+                    if (isWord) writeMemWord(e, d, readMemWord(e, s)); else writeMem8(e, d, readMem8(e, s));
                     r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
                 } else if (op.startsWith("LODS")) {
                     const s = calcPhys(r.DS, r.SI);
-                    if (isWord) r.AX = readMemWord(e, s); else r.AX = (r.AX & 0xFF00) | e.mem[s];
+                    if (isWord) r.AX = readMemWord(e, s); else r.AX = (r.AX & 0xFF00) | readMem8(e, s);
                     r.SI = (r.SI + dir) & 0xFFFF;
                 } else if (op.startsWith("STOS")) {
                     const d = calcPhys(r.ES, r.DI);
-                    if (isWord) writeMemWord(e, d, r.AX); else e.mem[d] = r.AX & 0xFF;
+                    if (isWord) writeMemWord(e, d, r.AX); else writeMem8(e, d, r.AX & 0xFF);
                     r.DI = (r.DI + dir) & 0xFFFF;
                 } else if (op.startsWith("CMPS")) {
                     const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
-                    const v1 = isWord ? readMemWord(e, s) : e.mem[s]; const v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                    const v1 = isWord ? readMemWord(e, s) : readMem8(e, s); const v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
                     const res = v1 - v2;
                     f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
                     r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
                 } else if (op.startsWith("SCAS")) {
                     const d = calcPhys(r.ES, r.DI);
-                    const v1 = isWord ? r.AX : r.AX & 0xFF; const v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                    const v1 = isWord ? r.AX : r.AX & 0xFF; const v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
                     const res = v1 - v2;
                     f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
                     r.DI = (r.DI + dir) & 0xFFFF;
@@ -795,7 +824,7 @@ export default function Emulator8086() {
         let opIP = e.reg.IP;
         
         const fetch8 = () => {
-            const v = e.mem[calcPhys(e.reg.CS, e.reg.IP)];
+            const v = readMem8(e, calcPhys(e.reg.CS, e.reg.IP));
             e.reg.IP = (e.reg.IP + 1) & 0xFFFF;
             return v;
         };
@@ -840,8 +869,8 @@ export default function Emulator8086() {
             }
             return {mod, reg, rm, addr, ea};
         };
-        const rmRd = (m, w) => m.mod===3 ? (w?getReg16(m.rm):getReg8(m.rm)) : (w?readMemWord(e, m.addr):e.mem[m.addr]);
-        const rmWr = (m, w, v) => { if(m.mod===3) {if(w)setReg16(m.rm,v);else setReg8(m.rm,v);} else {if(w)writeMemWord(e, m.addr,v);else e.mem[m.addr]=v&0xFF;} };
+        const rmRd = (m, w) => m.mod===3 ? (w?getReg16(m.rm):getReg8(m.rm)) : (w?readMemWord(e, m.addr):readMem8(e, m.addr));
+        const rmWr = (m, w, v) => { if(m.mod===3) {if(w)setReg16(m.rm,v);else setReg8(m.rm,v);} else {if(w)writeMemWord(e, m.addr,v);else writeMem8(e, m.addr,v);} };
 
         const updFlags = (r, isWord) => {
             e.flags.ZF = (r & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0;
@@ -851,14 +880,13 @@ export default function Emulator8086() {
         if (op === 0x90) return true;
         if (op === 0xF4) return false;
         
-        // Xử lý các lệnh thao tác Cờ (Flags)
-        if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI (Clear Interrupt Flag)
-        if (op === 0xFB) { e.flags.IF = 1; return true; } // STI (Set Interrupt Flag)
-        if (op === 0xF8) { e.flags.CF = 0; return true; } // CLC (Clear Carry Flag)
-        if (op === 0xF9) { e.flags.CF = 1; return true; } // STC (Set Carry Flag)
-        if (op === 0xFC) { e.flags.DF = 0; return true; } // CLD (Clear Direction Flag)
-        if (op === 0xFD) { e.flags.DF = 1; return true; } // STD (Set Direction Flag)
-        if (op === 0xF5) { e.flags.CF = 1 - e.flags.CF; return true; } // CMC (Complement Carry Flag)
+        if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI
+        if (op === 0xFB) { e.flags.IF = 1; return true; } // STI
+        if (op === 0xF8) { e.flags.CF = 0; return true; } // CLC
+        if (op === 0xF9) { e.flags.CF = 1; return true; } // STC
+        if (op === 0xFC) { e.flags.DF = 0; return true; } // CLD
+        if (op === 0xFD) { e.flags.DF = 1; return true; } // STD
+        if (op === 0xF5) { e.flags.CF = 1 - e.flags.CF; return true; } // CMC
         
         if (op >= 0xB8 && op <= 0xBF) { setReg16(op-0xB8, fetch16()); return true; } // MOV r16, imm16
         if (op >= 0xB0 && op <= 0xB7) { setReg8(op-0xB0, fetch8()); return true; } // MOV r8, imm8
@@ -889,8 +917,6 @@ export default function Emulator8086() {
         if (op === 0x61) { e.reg.DI = pop16(e); e.reg.SI = pop16(e); e.reg.BP = pop16(e); pop16(e); e.reg.BX = pop16(e); e.reg.DX = pop16(e); e.reg.CX = pop16(e); e.reg.AX = pop16(e); return true; } // POPA
         if (op === 0xC9) { e.reg.SP = e.reg.BP; e.reg.BP = pop16(e); return true; } // LEAVE
 
-        // Toàn bộ họ lệnh ALU (ADD, OR, ADC, SBB, AND, SUB, XOR, CMP)
-        // 1. Dạng ModR/M (0x00 đến 0x3B)
         const isALUModRM = (op >= 0x00 && op <= 0x03) || (op >= 0x08 && op <= 0x0B) ||
                            (op >= 0x10 && op <= 0x13) || (op >= 0x18 && op <= 0x1B) ||
                            (op >= 0x20 && op <= 0x23) || (op >= 0x28 && op <= 0x2B) ||
@@ -898,7 +924,7 @@ export default function Emulator8086() {
         if (isALUModRM) {
             const aluOp = (op >> 3) & 7;
             const isWord = (op & 1) === 1;
-            const dir = (op & 2) !== 0; // 1: reg <- r/m, 0: r/m <- reg
+            const dir = (op & 2) !== 0; 
             const m = modrmDec(isWord);
             const rmVal = rmRd(m, isWord);
             const regVal = isWord ? getReg16(m.reg) : getReg8(m.reg);
@@ -912,7 +938,7 @@ export default function Emulator8086() {
             else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; }
             else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; }
             else if (aluOp===4) { res = dst & src; e.flags.CF = 0; e.flags.OF = 0; }
-            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; } // SUB or CMP
+            else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; } 
             else if (aluOp===6) { res = dst ^ src; e.flags.CF = 0; e.flags.OF = 0; }
             
             updFlags(res, isWord); e.flags.PF = calcParity(res);
@@ -924,7 +950,6 @@ export default function Emulator8086() {
             return true;
         }
 
-        // 2. Dạng thanh ghi Accumulator (0x04, 0x05, 0x0C, 0x0D, ... 0x3C, 0x3D)
         const isALUAcc = (op & 0xC6) === 0x04;
         if (isALUAcc) {
             const aluOp = (op >> 3) & 7;
@@ -946,17 +971,12 @@ export default function Emulator8086() {
             return true;
         }
 
-        // 3. Dạng Immediate vào r/m (0x80, 0x81, 0x82, 0x83)
         if (op >= 0x80 && op <= 0x83) {
             const isWord = op === 0x81 || op === 0x83;
             const m = modrmDec(isWord);
             let imm = fetch8();
-            if (op === 0x81) {
-                const hi = fetch8();
-                imm = (hi << 8) | imm;
-            } else if (op === 0x83) {
-                imm = imm << 24 >> 24; // Mở rộng dấu 8-bit thành 16-bit
-            }
+            if (op === 0x81) { const hi = fetch8(); imm = (hi << 8) | imm; } 
+            else if (op === 0x83) imm = imm << 24 >> 24; 
             const dst = rmRd(m, isWord);
             const aluOp = m.reg;
             
@@ -974,26 +994,22 @@ export default function Emulator8086() {
             return true;
         }
 
-        // 4. TEST r/m, r (0x84, 0x85)
         if (op === 0x84 || op === 0x85) {
             const isWord = op === 0x85;
             const m = modrmDec(isWord);
             const v1 = rmRd(m, isWord);
             const v2 = isWord ? getReg16(m.reg) : getReg8(m.reg);
             const res = v1 & v2;
-            updFlags(res, isWord);
-            e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
+            updFlags(res, isWord); e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
             return true;
         }
         
-        // 5. LEA r16, m (0x8D)
         if (op === 0x8D) {
             const m = modrmDec(true);
             setReg16(m.reg, m.ea);
             return true;
         }
 
-        // XCHG r/m, r (0x86, 0x87)
         if (op === 0x86 || op === 0x87) {
             const isWord = op === 0x87;
             const m = modrmDec(isWord);
@@ -1004,71 +1020,55 @@ export default function Emulator8086() {
             return true;
         }
 
-        // XCHG AX, r16 (0x91-0x97)
         if (op >= 0x91 && op <= 0x97) {
             const r = op - 0x90;
-            const v1 = e.reg.AX;
-            e.reg.AX = getReg16(r);
-            setReg16(r, v1);
+            const v1 = e.reg.AX; e.reg.AX = getReg16(r); setReg16(r, v1);
             return true;
         }
 
-        // TEST AL/AX, imm (0xA8, 0xA9)
         if (op === 0xA8 || op === 0xA9) {
             const isWord = op === 0xA9;
             const imm = isWord ? fetch16() : fetch8();
             const dst = isWord ? e.reg.AX : (e.reg.AX & 0xFF);
             const res = dst & imm;
-            updFlags(res, isWord);
-            e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
+            updFlags(res, isWord); e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
             return true;
         }
         
-        // Nhóm lệnh F6 / F7 (TEST, NOT, NEG, MUL, IMUL, DIV, IDIV)
         if (op === 0xF6 || op === 0xF7) {
             const isWord = op === 0xF7;
             const m = modrmDec(isWord);
-            if (m.reg === 0 || m.reg === 1) { // TEST r/m, imm
+            if (m.reg === 0 || m.reg === 1) { 
                 const imm = isWord ? fetch16() : fetch8();
                 const v1 = rmRd(m, isWord);
                 const res = v1 & imm;
-                updFlags(res, isWord);
-                e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
-            } else if (m.reg === 2) { // NOT r/m
+                updFlags(res, isWord); e.flags.CF = 0; e.flags.OF = 0; e.flags.PF = calcParity(res);
+            } else if (m.reg === 2) { 
                 const v = rmRd(m, isWord);
                 rmWr(m, isWord, (~v) & (isWord ? 0xFFFF : 0xFF));
-            } else if (m.reg === 3) { // NEG r/m
+            } else if (m.reg === 3) { 
                 const v = rmRd(m, isWord);
                 const res = (0 - v) & (isWord ? 0xFFFF : 0xFF);
-                rmWr(m, isWord, res);
-                updFlags(res, isWord);
+                rmWr(m, isWord, res); updFlags(res, isWord);
                 e.flags.CF = v === 0 ? 0 : 1; e.flags.PF = calcParity(res);
-            } else if (m.reg === 4 || m.reg === 5) { // MUL / IMUL
+            } else if (m.reg === 4 || m.reg === 5) { 
                 const v = rmRd(m, isWord);
                 if (isWord) {
                     const u1 = e.reg.AX;
                     if (m.reg === 4) {
-                        const ur = (u1 * v) >>> 0;
-                        e.reg.AX = ur & 0xFFFF; e.reg.DX = (ur >>> 16) & 0xFFFF;
-                        e.flags.CF = e.flags.OF = e.reg.DX !== 0 ? 1 : 0;
+                        const ur = (u1 * v) >>> 0; e.reg.AX = ur & 0xFFFF; e.reg.DX = (ur >>> 16) & 0xFFFF; e.flags.CF = e.flags.OF = e.reg.DX !== 0 ? 1 : 0;
                     } else {
-                        const sr = ((u1 << 16) >> 16) * ((v << 16) >> 16);
-                        e.reg.AX = sr & 0xFFFF; e.reg.DX = (sr >> 16) & 0xFFFF;
-                        e.flags.CF = e.flags.OF = ((e.reg.AX & 0x8000) ? e.reg.DX === 0xFFFF : e.reg.DX === 0) ? 0 : 1;
+                        const sr = ((u1 << 16) >> 16) * ((v << 16) >> 16); e.reg.AX = sr & 0xFFFF; e.reg.DX = (sr >> 16) & 0xFFFF; e.flags.CF = e.flags.OF = ((e.reg.AX & 0x8000) ? e.reg.DX === 0xFFFF : e.reg.DX === 0) ? 0 : 1;
                     }
                 } else {
                     const u1 = e.reg.AX & 0xFF;
                     if (m.reg === 4) {
-                        const ur = u1 * v;
-                        e.reg.AX = ur & 0xFFFF;
-                        e.flags.CF = e.flags.OF = (ur & 0xFF00) !== 0 ? 1 : 0;
+                        const ur = u1 * v; e.reg.AX = ur & 0xFFFF; e.flags.CF = e.flags.OF = (ur & 0xFF00) !== 0 ? 1 : 0;
                     } else {
-                        const sr = ((u1 << 24) >> 24) * ((v << 24) >> 24);
-                        e.reg.AX = sr & 0xFFFF;
-                        e.flags.CF = e.flags.OF = ((sr & 0x80) ? (sr & 0xFF00) === 0xFF00 : (sr & 0xFF00) === 0) ? 0 : 1;
+                        const sr = ((u1 << 24) >> 24) * ((v << 24) >> 24); e.reg.AX = sr & 0xFFFF; e.flags.CF = e.flags.OF = ((sr & 0x80) ? (sr & 0xFF00) === 0xFF00 : (sr & 0xFF00) === 0) ? 0 : 1;
                     }
                 }
-            } else if (m.reg === 6 || m.reg === 7) { // DIV / IDIV
+            } else if (m.reg === 6 || m.reg === 7) { 
                 const d = rmRd(m, isWord);
                 if (d === 0) throw new Error("Divide by zero");
                 if (isWord) {
@@ -1096,41 +1096,30 @@ export default function Emulator8086() {
             return true;
         }
 
-        // PUSHF / POPF / CBW / CWD
         if (op === 0x9C) { push16(e, packFlags(e)); return true; }
         if (op === 0x9D) { unpackFlags(e, pop16(e)); return true; }
-        if (op === 0x98) { e.reg.AX = (e.reg.AX & 0x80) ? (0xFF00 | (e.reg.AX & 0xFF)) : (e.reg.AX & 0xFF); return true; } // CBW
-        if (op === 0x99) { e.reg.DX = (e.reg.AX & 0x8000) ? 0xFFFF : 0x0000; return true; } // CWD
+        if (op === 0x98) { e.reg.AX = (e.reg.AX & 0x80) ? (0xFF00 | (e.reg.AX & 0xFF)) : (e.reg.AX & 0xFF); return true; } 
+        if (op === 0x99) { e.reg.DX = (e.reg.AX & 0x8000) ? 0xFFFF : 0x0000; return true; } 
 
-        // IN / OUT
-        if (op === 0xE4 || op === 0xE5) { // IN AL/AX, imm8
-            const isWord = op === 0xE5;
-            const port = fetch8();
-            const val = e.ioPorts[port] || 0;
+        if (op === 0xE4 || op === 0xE5) { 
+            const isWord = op === 0xE5; const port = fetch8(); const val = e.ioPorts[port] || 0;
             if (isWord) setReg16(0, val); else setReg8(0, val);
             return true;
         }
-        if (op === 0xEC || op === 0xED) { // IN AL/AX, DX
-            const isWord = op === 0xED;
-            const port = e.reg.DX;
-            const val = e.ioPorts[port] || 0;
+        if (op === 0xEC || op === 0xED) { 
+            const isWord = op === 0xED; const port = e.reg.DX; const val = e.ioPorts[port] || 0;
             if (isWord) setReg16(0, val); else setReg8(0, val);
             return true;
         }
-        if (op === 0xE6 || op === 0xE7) { // OUT imm8, AL/AX
-            const isWord = op === 0xE7;
-            const port = fetch8();
-            handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
+        if (op === 0xE6 || op === 0xE7) { 
+            const isWord = op === 0xE7; const port = fetch8(); handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
             return true;
         }
-        if (op === 0xEE || op === 0xEF) { // OUT DX, AL/AX
-            const isWord = op === 0xEF;
-            const port = e.reg.DX;
-            handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
+        if (op === 0xEE || op === 0xEF) { 
+            const isWord = op === 0xEF; const port = e.reg.DX; handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
             return true;
         }
         
-        // Shift and Rotate (0xC0, 0xC1, 0xD0 - 0xD3)
         if (op === 0xC0 || op === 0xC1 || (op >= 0xD0 && op <= 0xD3)) {
             const isWord = op === 0xC1 || op === 0xD1 || op === 0xD3;
             const isCL = op === 0xD2 || op === 0xD3;
@@ -1138,10 +1127,8 @@ export default function Emulator8086() {
             const m = modrmDec(isWord);
             
             let count = 1;
-            if (isCL) count = e.reg.CX & 0xFF;
-            else if (isImm) count = fetch8();
-            
-            count &= 0x1F; // Mask bộ đếm xuống 5 bit (chuẩn của vi xử lý)
+            if (isCL) count = e.reg.CX & 0xFF; else if (isImm) count = fetch8();
+            count &= 0x1F;
 
             if (count > 0) {
                 let val = rmRd(m, isWord);
@@ -1150,77 +1137,52 @@ export default function Emulator8086() {
                 const shiftAmt = isWord ? 15 : 7;
 
                 for (let i = 0; i < count; i++) {
-                    const msb = (val & msbMask) !== 0;
-                    const lsb = (val & 1) !== 0;
-                    
-                    if (m.reg === 0) { // ROL
-                        e.flags.CF = msb ? 1 : 0;
-                        val = ((val << 1) | e.flags.CF) & maxVal;
-                    } else if (m.reg === 1) { // ROR
-                        e.flags.CF = lsb ? 1 : 0;
-                        val = ((val >> 1) | (e.flags.CF << shiftAmt)) & maxVal;
-                    } else if (m.reg === 2) { // RCL
-                        const oldCF = e.flags.CF;
-                        e.flags.CF = msb ? 1 : 0;
-                        val = ((val << 1) | oldCF) & maxVal;
-                    } else if (m.reg === 3) { // RCR
-                        const oldCF = e.flags.CF;
-                        e.flags.CF = lsb ? 1 : 0;
-                        val = ((val >> 1) | (oldCF << shiftAmt)) & maxVal;
-                    } else if (m.reg === 4 || m.reg === 6) { // SHL / SAL
-                        e.flags.CF = msb ? 1 : 0;
-                        val = (val << 1) & maxVal;
-                    } else if (m.reg === 5) { // SHR
-                        e.flags.CF = lsb ? 1 : 0;
-                        val = (val >> 1) & maxVal;
-                    } else if (m.reg === 7) { // SAR
-                        e.flags.CF = lsb ? 1 : 0;
-                        val = (val & msbMask) | ((val >> 1) & (maxVal >> 1));
-                    }
+                    const msb = (val & msbMask) !== 0; const lsb = (val & 1) !== 0;
+                    if (m.reg === 0) { e.flags.CF = msb ? 1 : 0; val = ((val << 1) | e.flags.CF) & maxVal; } 
+                    else if (m.reg === 1) { e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (e.flags.CF << shiftAmt)) & maxVal; } 
+                    else if (m.reg === 2) { const oldCF = e.flags.CF; e.flags.CF = msb ? 1 : 0; val = ((val << 1) | oldCF) & maxVal; } 
+                    else if (m.reg === 3) { const oldCF = e.flags.CF; e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (oldCF << shiftAmt)) & maxVal; } 
+                    else if (m.reg === 4 || m.reg === 6) { e.flags.CF = msb ? 1 : 0; val = (val << 1) & maxVal; } 
+                    else if (m.reg === 5) { e.flags.CF = lsb ? 1 : 0; val = (val >> 1) & maxVal; } 
+                    else if (m.reg === 7) { e.flags.CF = lsb ? 1 : 0; val = (val & msbMask) | ((val >> 1) & (maxVal >> 1)); }
                 }
-                rmWr(m, isWord, val);
-                
-                // Cập nhật Cờ (Flags)
-                updFlags(val, isWord);
-                e.flags.PF = calcParity(val);
+                rmWr(m, isWord, val); updFlags(val, isWord); e.flags.PF = calcParity(val);
             }
             return true;
         }
 
-        // Jumps and Calls
-        if (op === 0xE8) { const off = fetch16(); push16(e, e.reg.IP); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } // CALL rel16
-        if (op === 0xE9) { const off = fetch16(); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } // JMP rel16
-        if (op === 0xEB) { const off = fetch8()<<24>>24; e.reg.IP = (e.reg.IP + off) & 0xFFFF; return true; } // JMP short
-        if (op === 0xE2) { const off = fetch8()<<24>>24; e.reg.CX=(e.reg.CX-1)&0xFFFF; if (e.reg.CX!==0) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } // LOOP
-        if (op === 0xC3) { e.reg.IP = pop16(e); return true; } // RET near
-        if (op === 0xC2) { const bytes = fetch16(); e.reg.IP = pop16(e); e.reg.SP = (e.reg.SP + bytes) & 0xFFFF; return true; } // RET near imm16
-        if (op === 0xCB) { e.reg.IP = pop16(e); e.reg.CS = pop16(e); return true; } // RET far
-        if (op === 0xCA) { const bytes = fetch16(); e.reg.IP = pop16(e); e.reg.CS = pop16(e); e.reg.SP = (e.reg.SP + bytes) & 0xFFFF; return true; } // RET far imm16
-        if (op === 0xCF) { e.reg.IP = pop16(e); e.reg.CS = pop16(e); unpackFlags(e, pop16(e)); return true; } // IRET
-        if (op === 0xEA) { const ip = fetch16(); const cs = fetch16(); e.reg.IP = ip; e.reg.CS = cs; return true; } // JMP far ptr16:16
-        if (op === 0x9A) { const ip = fetch16(); const cs = fetch16(); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = ip; e.reg.CS = cs; return true; } // CALL far ptr16:16
+        if (op === 0xE8) { const off = fetch16(); push16(e, e.reg.IP); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } 
+        if (op === 0xE9) { const off = fetch16(); e.reg.IP = (e.reg.IP + (off<<16>>16)) & 0xFFFF; return true; } 
+        if (op === 0xEB) { const off = fetch8()<<24>>24; e.reg.IP = (e.reg.IP + off) & 0xFFFF; return true; } 
+        if (op === 0xE2) { const off = fetch8()<<24>>24; e.reg.CX=(e.reg.CX-1)&0xFFFF; if (e.reg.CX!==0) e.reg.IP=(e.reg.IP+off)&0xFFFF; return true; } 
+        if (op === 0xC3) { e.reg.IP = pop16(e); return true; } 
+        if (op === 0xC2) { const bytes = fetch16(); e.reg.IP = pop16(e); e.reg.SP = (e.reg.SP + bytes) & 0xFFFF; return true; } 
+        if (op === 0xCB) { e.reg.IP = pop16(e); e.reg.CS = pop16(e); return true; } 
+        if (op === 0xCA) { const bytes = fetch16(); e.reg.IP = pop16(e); e.reg.CS = pop16(e); e.reg.SP = (e.reg.SP + bytes) & 0xFFFF; return true; } 
+        if (op === 0xCF) { e.reg.IP = pop16(e); e.reg.CS = pop16(e); unpackFlags(e, pop16(e)); return true; } 
+        if (op === 0xEA) { const ip = fetch16(); const cs = fetch16(); e.reg.IP = ip; e.reg.CS = cs; return true; } 
+        if (op === 0x9A) { const ip = fetch16(); const cs = fetch16(); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = ip; e.reg.CS = cs; return true; } 
 
-        // Conditional Jumps
         if (op >= 0x70 && op <= 0x7F) {
             const off = fetch8()<<24>>24;
             let cond = false;
             switch(op) {
-                case 0x70: cond = e.flags.OF === 1; break; // JO
-                case 0x71: cond = e.flags.OF === 0; break; // JNO
-                case 0x72: cond = e.flags.CF === 1; break; // JB/JC/JNAE
-                case 0x73: cond = e.flags.CF === 0; break; // JAE/JNB/JNC
-                case 0x74: cond = e.flags.ZF === 1; break; // JE/JZ
-                case 0x75: cond = e.flags.ZF === 0; break; // JNE/JNZ
-                case 0x76: cond = e.flags.CF === 1 || e.flags.ZF === 1; break; // JBE/JNA
-                case 0x77: cond = e.flags.CF === 0 && e.flags.ZF === 0; break; // JA/JNBE
-                case 0x78: cond = e.flags.SF === 1; break; // JS
-                case 0x79: cond = e.flags.SF === 0; break; // JNS
-                case 0x7A: cond = e.flags.PF === 1; break; // JP/JPE
-                case 0x7B: cond = e.flags.PF === 0; break; // JNP/JPO
-                case 0x7C: cond = e.flags.SF !== e.flags.OF; break; // JL/JNGE
-                case 0x7D: cond = e.flags.SF === e.flags.OF; break; // JGE/JNL
-                case 0x7E: cond = e.flags.ZF === 1 || e.flags.SF !== e.flags.OF; break; // JLE/JNG
-                case 0x7F: cond = e.flags.ZF === 0 && e.flags.SF === e.flags.OF; break; // JG/JNLE
+                case 0x70: cond = e.flags.OF === 1; break; 
+                case 0x71: cond = e.flags.OF === 0; break; 
+                case 0x72: cond = e.flags.CF === 1; break; 
+                case 0x73: cond = e.flags.CF === 0; break; 
+                case 0x74: cond = e.flags.ZF === 1; break; 
+                case 0x75: cond = e.flags.ZF === 0; break; 
+                case 0x76: cond = e.flags.CF === 1 || e.flags.ZF === 1; break; 
+                case 0x77: cond = e.flags.CF === 0 && e.flags.ZF === 0; break; 
+                case 0x78: cond = e.flags.SF === 1; break; 
+                case 0x79: cond = e.flags.SF === 0; break; 
+                case 0x7A: cond = e.flags.PF === 1; break; 
+                case 0x7B: cond = e.flags.PF === 0; break; 
+                case 0x7C: cond = e.flags.SF !== e.flags.OF; break; 
+                case 0x7D: cond = e.flags.SF === e.flags.OF; break; 
+                case 0x7E: cond = e.flags.ZF === 1 || e.flags.SF !== e.flags.OF; break; 
+                case 0x7F: cond = e.flags.ZF === 0 && e.flags.SF === e.flags.OF; break; 
             }
             if (cond) e.reg.IP = (e.reg.IP + off) & 0xFFFF;
             return true;
@@ -1233,70 +1195,59 @@ export default function Emulator8086() {
             return true;
         }
 
-        // String Operations: A4-A7 (MOVS, CMPS), AA-AF (STOS, LODS, SCAS)
         if ((op >= 0xA4 && op <= 0xA7) || (op >= 0xAA && op <= 0xAF)) {
             const isWord = (op % 2) === 1;
             const sz = isWord ? 2 : 1;
             const dir = e.flags.DF === 0 ? sz : -sz;
 
             const doStringOp = () => {
-                if (op === 0xA4 || op === 0xA5) { // MOVS
+                if (op === 0xA4 || op === 0xA5) { 
                     const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
                     const d = calcPhys(e.reg.ES, e.reg.DI);
-                    if (isWord) writeMemWord(e, d, readMemWord(e, s));
-                    else e.mem[d] = e.mem[s];
-                    e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
-                    e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
-                } else if (op === 0xAC || op === 0xAD) { // LODS
+                    if (isWord) writeMemWord(e, d, readMemWord(e, s)); else writeMem8(e, d, readMem8(e, s));
+                    e.reg.SI = (e.reg.SI + dir) & 0xFFFF; e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
+                } else if (op === 0xAC || op === 0xAD) { 
                     const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
-                    if (isWord) setReg16(0, readMemWord(e, s)); // 0 is AX
-                    else setReg8(0, e.mem[s]); // 0 is AL
+                    if (isWord) setReg16(0, readMemWord(e, s)); else setReg8(0, readMem8(e, s)); 
                     e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
-                } else if (op === 0xAA || op === 0xAB) { // STOS
+                } else if (op === 0xAA || op === 0xAB) { 
                     const d = calcPhys(e.reg.ES, e.reg.DI);
-                    if (isWord) writeMemWord(e, d, getReg16(0));
-                    else e.mem[d] = getReg8(0);
+                    if (isWord) writeMemWord(e, d, getReg16(0)); else writeMem8(e, d, getReg8(0));
                     e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
-                } else if (op === 0xA6 || op === 0xA7 || op === 0xAE || op === 0xAF) { // CMPS & SCAS
+                } else if (op === 0xA6 || op === 0xA7 || op === 0xAE || op === 0xAF) { 
                     const d = calcPhys(e.reg.ES, e.reg.DI);
                     let v1, v2;
-                    if (op === 0xA6 || op === 0xA7) { // CMPS
+                    if (op === 0xA6 || op === 0xA7) { 
                         const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
-                        v1 = isWord ? readMemWord(e, s) : e.mem[s];
-                        v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                        v1 = isWord ? readMemWord(e, s) : readMem8(e, s);
+                        v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
                         e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
-                    } else { // SCAS
+                    } else { 
                         v1 = isWord ? getReg16(0) : getReg8(0);
-                        v2 = isWord ? readMemWord(e, d) : e.mem[d];
+                        v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
                     }
                     e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
                     const res = v1 - v2;
-                    updFlags(res, isWord);
-                    e.flags.CF = v1 < v2 ? 1 : 0;
-                    e.flags.PF = calcParity(res);
+                    updFlags(res, isWord); e.flags.CF = v1 < v2 ? 1 : 0; e.flags.PF = calcParity(res);
                 }
             };
 
             if (repPrefix !== 0) {
                 if (e.reg.CX === 0) return true;
-                doStringOp();
-                e.reg.CX = (e.reg.CX - 1) & 0xFFFF;
+                doStringOp(); e.reg.CX = (e.reg.CX - 1) & 0xFFFF;
                 let repeat = e.reg.CX !== 0;
                 if (op === 0xA6 || op === 0xA7 || op === 0xAE || op === 0xAF) {
-                    if (repPrefix === 0xF3) repeat = repeat && (e.flags.ZF === 1); // REPE/REPZ
-                    if (repPrefix === 0xF2) repeat = repeat && (e.flags.ZF === 0); // REPNE/REPNZ
+                    if (repPrefix === 0xF3) repeat = repeat && (e.flags.ZF === 1); 
+                    if (repPrefix === 0xF2) repeat = repeat && (e.flags.ZF === 0); 
                 }
-                if (repeat) e.reg.IP = opIP; // Lặp lại lệnh (quay về prefix)
-            } else {
-                doStringOp();
-            }
+                if (repeat) e.reg.IP = opIP; 
+            } else doStringOp();
             return true;
         }
 
         throw new Error(`X86 BINARY ERROR: Unsupported Opcode 0x${op.toString(16).toUpperCase()} at ${toHex(e.reg.CS)}:${toHex(opIP)}`);
     };
 
-    // Bộ định tuyến Engine
     const executeStep = () => {
         if (execMode === "BIN") return executeBinaryStep();
         else return executeAstStep();
@@ -1399,10 +1350,10 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
-                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} />
+                        <VGAMonitor vga={e.vga} cs={e.reg.CS} ip={e.reg.IP} />
                         <MemoryViewer 
                             title="Memory View 1" 
-                            memory={e.mem} 
+                            getMemByte={getMemByteSafe} 
                             memSegStr={memSegStr} setMemSegStr={setMemSegStr} 
                             memOffStr={memOffStr} setMemOffStr={setMemOffStr} 
                             hasToggle={true} isToggled={showMem2} onToggle={setShowMem2}
@@ -1412,7 +1363,7 @@ export default function Emulator8086() {
                         {showMem2 && (
                             <MemoryViewer 
                                 title="Memory View 2" 
-                                memory={e.mem} 
+                                getMemByte={getMemByteSafe} 
                                 memSegStr={mem2SegStr} setMemSegStr={setMem2SegStr} 
                                 memOffStr={mem2OffStr} setMemOffStr={setMem2OffStr} 
                                 onMemoryChange={handleMemoryChange} isRunning={isRunning}
