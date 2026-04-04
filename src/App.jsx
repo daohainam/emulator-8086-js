@@ -83,7 +83,7 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
     );
 }
 
-function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory, activeLine }) {
+function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory, activeLine, execMode }) {
     const overlayRef = useRef(null);
     const textareaRef = useRef(null);
 
@@ -135,9 +135,23 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
                     value={code} 
                     onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} 
                     onScroll={handleScroll}
-                    className="absolute inset-0 w-full h-full bg-transparent p-4 text-emerald-400 font-mono text-[13px] focus:outline-none resize-none leading-[24px] whitespace-pre custom-scrollbar z-10" 
+                    disabled={execMode === 'BIN'}
+                    className={`absolute inset-0 w-full h-full bg-transparent p-4 font-mono text-[13px] focus:outline-none resize-none leading-[24px] whitespace-pre custom-scrollbar z-10 ${execMode === 'BIN' ? 'text-slate-500 cursor-not-allowed' : 'text-emerald-400'}`} 
                     spellCheck="false" 
                 />
+                
+                {/* Lớp Overlay khóa giao diện báo hiệu Hardware Mode */}
+                {execMode === 'BIN' && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-[2px] pointer-events-none transition-all duration-300">
+                        <div className="bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-400 px-5 py-4 rounded-xl shadow-2xl flex items-center space-x-3">
+                            <span className="text-2xl">🔒</span>
+                            <div className="flex flex-col">
+                                <span className="font-bold text-xs uppercase tracking-widest mb-1">Mã Assembly bị khóa</span>
+                                <span className="text-[10px] text-slate-400">Đang mô phỏng mã máy (X86 Hardware)</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -1381,7 +1395,7 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} activeLine={activeLine} />
+                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} activeLine={activeLine} execMode={execMode} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
