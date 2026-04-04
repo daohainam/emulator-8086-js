@@ -71,7 +71,7 @@ const calcParity = (val) => {
 // 2. UI SUB-COMPONENTS
 // ==========================================
 
-function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, execMode }) {
+function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, execMode, loadStateFromJson }) {
     return (
         <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
             <div className="flex items-center space-x-4">
@@ -81,14 +81,18 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
                 <div>
                     <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
                     <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-                        1MB RAM | Engine: 
+                        1MB RAM MAP | Engine: 
                         <span className={`ml-1 ${execMode === 'BIN' ? 'text-fuchsia-400 font-bold' : 'text-indigo-400 font-bold'}`}>
                             {execMode === 'BIN' ? 'X86 HARDWARE' : 'AST INTERPRETER'}
                         </span>
                     </p>
                 </div>
             </div>
-            <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center">
+            <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center items-center">
+                <label className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 cursor-pointer flex items-center">
+                    <span className="mr-1">📥</span> Load from JSON
+                    <input type="file" accept=".json" className="hidden" onChange={loadStateFromJson} disabled={isRunning} />
+                </label>
                 <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
                 <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Assemble</button>
@@ -193,7 +197,8 @@ function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
                         {Array.from({ length: VGA_COLS }).map((_, x) => {
                             const offset = (y * VGA_COLS + x) * 2;
                             const charCode = memory[VGA_BASE + offset] || 0;
-                            const attr = memory[VGA_BASE + offset + 1] || 0x07;
+                            let attr = memory[VGA_BASE + offset + 1];
+                            if (attr === 0) attr = 0x07;
                             const fg = DOS_COLORS[attr & 0x0F];
                             const bg = DOS_COLORS[(attr >> 4) & 0x0F];
                             const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
@@ -328,7 +333,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
                         <input type="text" value={memOffStr} onChange={e => setMemOffStr(e.target.value)} className="w-12 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
                     </div>
                     <label className={`flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white rounded px-2 py-0.5 cursor-pointer transition-colors ml-1 shadow-lg ${isRunning ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <span className="mr-1 text-[11px]">📥</span> Load
+                        <span className="mr-1 text-[11px]">📥</span> Bin Load
                         <input type="file" className="hidden" accept=".bin,.hex,.com,.exe,.txt" onChange={handleFileUpload} disabled={isRunning} />
                     </label>
                 </div>
@@ -404,8 +409,8 @@ export default function Emulator8086() {
     const [keepMemory, setKeepMemory] = useState(false);
     const [execMode, setExecMode] = useState("AST"); 
 
-    const [orgOffset, setOrgOffset] = useState("0x0000"); 
-    const [memSegStr, setMemSegStr] = useState("0x0000"); 
+    const [orgOffset, setOrgOffset] = useState("0x1000"); 
+    const [memSegStr, setMemSegStr] = useState("0x1000"); 
     const [memOffStr, setMemOffStr] = useState("0x0000");
     const [showMem2, setShowMem2] = useState(false);
     const [mem2SegStr, setMem2SegStr] = useState("0xB800"); 
@@ -423,7 +428,7 @@ export default function Emulator8086() {
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(ADDR_SPACE),   // Toàn bộ 1MB RAM không gian địa chỉ
+        mem: new Uint8Array(ADDR_SPACE), 
         disk: new Uint8Array(DISK_SIZE),
         ioPorts: {},
         insts: [],
@@ -442,13 +447,9 @@ export default function Emulator8086() {
     // ===============================================
     // CORE: MEMORY MANAGER
     // ===============================================
-    const readMem8 = (e, phys) => {
-        return e.mem[phys];
-    };
-
-    const writeMem8 = (e, phys, val) => {
-        e.mem[phys] = val & 0xFF;
-    };
+    const readMem8 = (e, phys) => e.mem[phys];
+    const writeMem8 = (e, phys, val) => { e.mem[phys] = val & 0xFF; };
+    const writeMem8Safe = (e, phys, val) => { if (phys < ADDR_SPACE) e.mem[phys] = val & 0xFF; };
 
     const readMemWord = (e, phys) => readMem8(e, phys) | (readMem8(e, phys + 1) << 8);
     const writeMemWord = (e, phys, val) => { writeMem8(e, phys, val & 0xFF); writeMem8(e, phys + 1, (val >> 8) & 0xFF); };
@@ -457,26 +458,86 @@ export default function Emulator8086() {
 
     const getMemByteSafe = (phys) => {
         if (phys < ADDR_SPACE) return eng.current.mem[phys];
-        return null; // Return null for Unmapped Memory
+        return null; 
     };
 
     const handleMemoryChange = (addr, valStr) => {
         let val = parseInt(valStr, 16);
         if (isNaN(val)) val = 0;
-        if (addr < ADDR_SPACE) eng.current.mem[addr] = val & 0xFF;
+        writeMem8Safe(eng.current, addr, val);
         forceRender();
     };
 
     const handleLoadMemory = (startAddr, data, filename) => {
         const e = eng.current;
         for (let i = 0; i < data.length; i++) {
-            const addr = startAddr + i;
-            if (addr < ADDR_SPACE) e.mem[addr] = data[i];
-            else break; // Dừng nếu vượt quá giới hạn 1MB
+            writeMem8Safe(e, startAddr + i, data[i]);
         }
         addLog(`Loaded ${data.length} bytes from ${filename} to ${toHex(startAddr, 5)}`);
         setExecMode("BIN"); 
         forceRender();
+    };
+
+    // Load trạng thái JSON (State Parsing) in React JS format
+    const loadStateFromJson = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const state = JSON.parse(ev.target.result);
+                const en = eng.current;
+
+                setIsRunning(false);
+                isRunningRef.current = false;
+                if (requestRef.current) cancelAnimationFrame(requestRef.current);
+
+                if (state.registers) {
+                    for (const [reg, val] of Object.entries(state.registers)) {
+                        const r = reg.toUpperCase();
+                        if (en.reg[r] !== undefined) {
+                            en.reg[r] = parseInt(val, 16) & 0xFFFF;
+                        }
+                    }
+                }
+
+                if (state.flags) {
+                    for (const [flg, val] of Object.entries(state.flags)) {
+                        const f = flg.toUpperCase();
+                        if (en.flags[f] !== undefined) {
+                            en.flags[f] = val ? 1 : 0;
+                        }
+                    }
+                }
+
+                if (state.vga) {
+                    if (state.vga.cursorX !== undefined) en.cursorX = Math.min(Math.max(state.vga.cursorX, 0), 79);
+                    if (state.vga.cursorY !== undefined) en.cursorY = Math.min(Math.max(state.vga.cursorY, 0), 24);
+                }
+
+                if (state.memory && Array.isArray(state.memory)) {
+                    for (const block of state.memory) {
+                        if (!block.data) continue;
+                        const startAddr = parseInt(block.address, 16) || 0;
+                        for (let i = 0; i < block.data.length; i++) {
+                            const addr = (startAddr + i) & 0xFFFFF;
+                            const val = parseInt(block.data[i], 16) & 0xFF;
+                            writeMem8Safe(en, addr, val); 
+                        }
+                    }
+                }
+
+                addLog(`✅ Nạp thành công State JSON ${state.description ? `(${state.description})` : ''}`);
+                setExecMode("BIN");
+                setIsAssembled(true);
+                setErrorMessage(null);
+                forceRender();
+            } catch (err) {
+                setErrorMessage(`Lỗi nạp file JSON: ${err.message}`);
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = null; 
     };
 
     const handleRegChange = (reg, valStr) => {
@@ -546,7 +607,7 @@ export default function Emulator8086() {
 
     const handleKeyDown = (e) => {
         if (e.key.length === 1) {
-            writeMem8(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
+            writeMem8Safe(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
             eng.current.ioPorts[0x60] = e.key.charCodeAt(0);
             forceRender();
         }
@@ -557,7 +618,7 @@ export default function Emulator8086() {
         if (port === 0x70) e.diskSectorSelect = val % 256;
         if (port === 0x71) {
             const rAddr = calcPhys(e.reg.DS, e.reg.BX); const dAddr = e.diskSectorSelect * 16;
-            if (val === 1) for(let i=0; i<16; i++) writeMem8(e, rAddr + i, e.disk[dAddr + i]);
+            if (val === 1) for(let i=0; i<16; i++) writeMem8Safe(e, rAddr + i, e.disk[dAddr + i]);
             if (val === 2) for(let i=0; i<16; i++) e.disk[dAddr + i] = readMem8(e, rAddr + i);
         }
         if (port === 0x42) {
@@ -585,7 +646,6 @@ export default function Emulator8086() {
         f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
     };
     
-    // BIOS Interrupt 10h (Video Services) Handler
     const handleInt10 = (e) => {
         const ax = e.reg.AX; const bx = e.reg.BX; const cx = e.reg.CX; const dx = e.reg.DX;
         const ah = (ax >> 8) & 0xFF; const al = ax & 0xFF;
@@ -619,15 +679,15 @@ export default function Emulator8086() {
             }
         };
 
-        if (ah === 0x00) { // Set video mode / Clear screen
+        if (ah === 0x00) { 
             for (let i = 0; i < VGA_SIZE; i += 2) { e.mem[VGA_BASE + i] = 0; e.mem[VGA_BASE + i + 1] = 0x07; }
             e.cursorX = 0; e.cursorY = 0;
-        } else if (ah === 0x02) { // Set cursor position
+        } else if (ah === 0x02) { 
             e.cursorY = Math.min(dh, 24);
             e.cursorX = Math.min(dl, 79);
-        } else if (ah === 0x06) { // Scroll up / Clear window
+        } else if (ah === 0x06) { 
             scrollUp(al, bh, ch, cl, dh, dl);
-        } else if (ah === 0x09) { // Write char and attr at cursor position
+        } else if (ah === 0x09) { 
             let cX = e.cursorX; let cY = e.cursorY;
             for(let i = 0; i < cx; i++) {
                 const idx = VGA_BASE + (cY * 80 + cX) * 2;
@@ -635,10 +695,10 @@ export default function Emulator8086() {
                 cX++; if (cX >= 80) { cX = 0; cY++; }
                 if (cY >= 25) break; 
             }
-        } else if (ah === 0x0E) { // Teletype output
-            if (al === 13) { e.cursorX = 0; } // Carriage Return \r
-            else if (al === 10) { e.cursorY++; } // Line Feed \n
-            else if (al === 8) { if (e.cursorX > 0) e.cursorX--; } // Backspace \b
+        } else if (ah === 0x0E) { 
+            if (al === 13) { e.cursorX = 0; } 
+            else if (al === 10) { e.cursorY++; } 
+            else if (al === 8) { if (e.cursorX > 0) e.cursorX--; } 
             else {
                 const idx = VGA_BASE + (e.cursorY * 80 + e.cursorX) * 2;
                 e.mem[idx] = al; e.mem[idx + 1] = 0x07;
@@ -747,9 +807,11 @@ export default function Emulator8086() {
             }
             case "NEG": {
                 const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
+                const signBit = is8 ? 0x80 : 0x8000;
                 const v = getOpVal(e, args[0]); const res = (0 - v) & mask;
                 writeOpVal(e, args[0], res);
-                f.CF = v === 0 ? 0 : 1; f.ZF = res === 0 ? 1 : 0; f.SF = (res & (is8 ? 0x80 : 0x8000)) ? 1 : 0; f.PF = calcParity(res);
+                f.CF = v === 0 ? 0 : 1; f.ZF = res === 0 ? 1 : 0; f.SF = (res & signBit) ? 1 : 0; f.PF = calcParity(res);
+                f.OF = v === signBit ? 1 : 0;
                 break;
             }
             case "MUL": case "IMUL": case "DIV": case "IDIV": {
@@ -1162,10 +1224,12 @@ export default function Emulator8086() {
                 const v = rmRd(m, isWord);
                 rmWr(m, isWord, (~v) & (isWord ? 0xFFFF : 0xFF));
             } else if (m.reg === 3) { 
+                const signBit = isWord ? 0x8000 : 0x80;
                 const v = rmRd(m, isWord);
                 const res = (0 - v) & (isWord ? 0xFFFF : 0xFF);
                 rmWr(m, isWord, res); updFlags(res, isWord);
                 e.flags.CF = v === 0 ? 0 : 1; e.flags.PF = calcParity(res);
+                e.flags.OF = v === signBit ? 1 : 0;
             } else if (m.reg === 4 || m.reg === 5) { 
                 const v = rmRd(m, isWord);
                 if (isWord) {
@@ -1399,7 +1463,7 @@ export default function Emulator8086() {
     };
 
     const assemble = () => {
-        setExecMode("AST"); // Bật lại Mode Interpreter
+        setExecMode("AST"); 
         resetCPU();
         const e = eng.current;
         const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
@@ -1430,7 +1494,7 @@ export default function Emulator8086() {
         resetCPU();
         for (let i = 0; i < SECTOR_SIZE; i++) e.mem[BOOT_LOAD_ADDR + i] = e.disk[i];
         e.reg.IP = BOOT_LOAD_ADDR; e.reg.CS = 0x0000;
-        setExecMode("BIN"); // Khởi động từ Disk là chạy mã nhị phân thực thụ
+        setExecMode("BIN"); 
         addLog(`BIOS: Booting from disk (Hardware Mode) at ${toHex(BOOT_LOAD_ADDR, 4)}...`);
         setIsAssembled(true); setIsRunning(true); isRunningRef.current = true;
         requestRef.current = requestAnimationFrame(runLoop);
@@ -1456,7 +1520,7 @@ export default function Emulator8086() {
                 <HeaderControls 
                     isRunning={isRunning} isAssembled={isAssembled} initAudio={initAudio} 
                     bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset} 
-                    toggleRun={toggleRun} stepUI={stepUI} execMode={execMode}
+                    toggleRun={toggleRun} stepUI={stepUI} execMode={execMode} loadStateFromJson={loadStateFromJson}
                 />
 
                 {errorMessage && (
