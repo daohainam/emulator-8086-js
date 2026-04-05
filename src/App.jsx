@@ -76,7 +76,7 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
                     <span className="font-bold text-white text-xl">OS</span>
                 </div>
                 <div>
-                    <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
+                    <h1 className="text-xl font-bold text-white tracking-tight">8086 EMULATOR</h1>
                     <p className="text-[10px] text-slate-400 uppercase tracking-widest">
                         1MB RAM MAP | Engine: <span className="ml-1 text-fuchsia-400 font-bold">X86 HARDWARE</span>
                     </p>
