@@ -628,7 +628,7 @@ export default function Emulator8086() {
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = INITIAL_SP;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        if (!keepMemory) e.mem.fill(0);
+        e.mem.fill(0);
         e.ioPorts = {};
         e.t2Div = 0;
         e.t2High = false;
