@@ -115,6 +115,17 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset, keepMemory, setKee
                         <span className="text-slate-500">ORG (Origin):</span>
                         <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
                     </div>
+                    <label className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded cursor-pointer transition-all active:scale-95">
+                        📂 Load .asm
+                        <input type="file" accept=".asm,.s,.txt" className="hidden" onChange={e => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = ev => setCode(ev.target.result);
+                            reader.readAsText(file);
+                            e.target.value = null;
+                        }} />
+                    </label>
                 </div>
             </div>
             <div className="relative flex-1 bg-slate-950/30 overflow-hidden">
