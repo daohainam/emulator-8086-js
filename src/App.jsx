@@ -356,8 +356,9 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
     );
 }
 
-function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig, ioLogs }) {
+function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig, ioLogs, prevRegs }) {
     const e = eng.current;
+    const prev = prevRegs;
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 shadow-xl flex flex-col">
             <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-1">
@@ -365,25 +366,28 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
                 <span className="text-[9px] text-slate-500 italic">Editable</span>
             </div>
             <div className="space-y-1 text-xs mb-3">
-                {["AX", "BX", "CX", "DX", "SI", "DI", "SP", "BP", "CS", "DS", "SS", "ES", "IP"].map(reg => (
-                    <div key={reg} className="flex justify-between items-center font-mono">
-                        <span className="text-blue-400 font-bold">{reg}</span>
-                        <input 
-                            type="text"
-                            defaultValue={toHex(e.reg[reg])}
-                            key={`${reg}-${e.reg[reg]}`}
-                            onBlur={(ev) => handleRegChange(reg, ev.target.value)}
-                            disabled={isRunning}
-                            className="w-14 bg-slate-950 text-emerald-400 border border-slate-700 rounded px-1 py-0.5 text-right text-[11px] focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                        />
-                    </div>
-                ))}
+                {["AX", "BX", "CX", "DX", "SI", "DI", "SP", "BP", "CS", "DS", "SS", "ES", "IP"].map(reg => {
+                    const changed = prev && prev.reg[reg] !== e.reg[reg];
+                    return (
+                        <div key={reg} className="flex justify-between items-center font-mono">
+                            <span className={changed ? "text-yellow-300 font-bold" : "text-blue-400 font-bold"}>{reg}</span>
+                            <input 
+                                type="text"
+                                defaultValue={toHex(e.reg[reg])}
+                                key={`${reg}-${e.reg[reg]}`}
+                                onBlur={(ev) => handleRegChange(reg, ev.target.value)}
+                                disabled={isRunning}
+                                className={`w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-right text-[11px] focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${changed ? "text-yellow-300 border-yellow-600" : "text-emerald-400"}`}
+                            />
+                        </div>
+                    );
+                })}
             </div>
-            <div className="grid grid-cols-2 gap-1 text-[9px] uppercase font-bold text-slate-500 border-t border-slate-800 pt-2">
-                <span>ZF: {e.flags.ZF}</span><span>CF: {e.flags.CF}</span>
-                <span>SF: {e.flags.SF}</span><span>OF: {e.flags.OF}</span>
-                <span>DF: {e.flags.DF}</span><span>IF: {e.flags.IF}</span>
-                <span>PF: {e.flags.PF}</span><span>AF: {e.flags.AF}</span>
+            <div className="grid grid-cols-2 gap-1 text-[9px] uppercase font-bold border-t border-slate-800 pt-2">
+                {[["ZF","CF"],["SF","OF"],["DF","IF"],["PF","AF"]].map(([f1,f2]) => [
+                    <span key={f1} className={prev && prev.flags[f1] !== e.flags[f1] ? "text-yellow-300" : "text-slate-500"}>{f1}: {e.flags[f1]}</span>,
+                    <span key={f2} className={prev && prev.flags[f2] !== e.flags[f2] ? "text-yellow-300" : "text-slate-500"}>{f2}: {e.flags[f2]}</span>
+                ])}
             </div>
             
             <div className="mt-2 text-[11px] font-mono text-center text-fuchsia-400 bg-slate-950/80 py-1 rounded border border-slate-800">
@@ -430,6 +434,7 @@ export default function Emulator8086() {
 
     const isRunningRef = useRef(false);
     const requestRef = useRef(null);
+    const prevRegsRef = useRef(null);
     const audioCtxRef = useRef(null);
     const oscRef = useRef(null);
 
@@ -611,6 +616,7 @@ export default function Emulator8086() {
         setIsRunning(false);
         isRunningRef.current = false;
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        prevRegsRef.current = null;
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = INITIAL_SP;
@@ -1324,6 +1330,7 @@ export default function Emulator8086() {
         try {
             const e = eng.current;
             const cs = e.reg.CS, ipBefore = e.reg.IP;
+            prevRegsRef.current = { reg: { ...e.reg }, flags: { ...e.flags } };
             executeStep();
             const ipAfter = e.reg.IP;
             const len = ((ipAfter - ipBefore) & 0xFFFF) || 1;
@@ -1344,11 +1351,14 @@ export default function Emulator8086() {
         else { setIsRunning(false); isRunningRef.current = false; }
     }, []);
 
+    const clearPrevRegs = () => { prevRegsRef.current = null; };
+
     const toggleRun = () => {
         if (isRunning) {
             setIsRunning(false); isRunningRef.current = false;
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         } else {
+            prevRegsRef.current = null;
             setIsRunning(true); isRunningRef.current = true;
             requestRef.current = requestAnimationFrame(runLoop);
         }
@@ -1451,7 +1461,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-2 space-y-4">
-                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} />
+                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} />
                     </div>
                 </div>
             </div>
