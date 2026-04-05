@@ -68,7 +68,7 @@ const calcParity = (val) => {
 // 2. UI SUB-COMPONENTS
 // ==========================================
 
-function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, loadStateFromJson }) {
+function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, loadStateFromJson, saveStateToJson }) {
     return (
         <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
             <div className="flex items-center space-x-4">
@@ -87,6 +87,7 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
                     <span className="mr-1">📥</span> Load from JSON
                     <input type="file" accept=".json" className="hidden" onChange={loadStateFromJson} disabled={isRunning} />
                 </label>
+                <button onClick={saveStateToJson} disabled={isRunning} className="px-4 py-2 bg-fuchsia-700 hover:bg-fuchsia-600 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">💾 Save to JSON</button>
                 <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
                 <button onClick={assemble} disabled={isRunning} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">Assemble</button>
@@ -479,7 +480,64 @@ export default function Emulator8086() {
             }
         };
         reader.readAsText(file);
-        e.target.value = null; 
+        e.target.value = null;
+    };
+
+    const saveStateToJson = () => {
+        const en = eng.current;
+
+        // Collect non-zero memory blocks (scan in 16-byte chunks)
+        const CHUNK = 16;
+        const memBlocks = [];
+        let blockStart = -1;
+        let blockData = [];
+
+        const flushBlock = () => {
+            if (blockStart >= 0 && blockData.length > 0) {
+                memBlocks.push({
+                    address: blockStart.toString(16).toUpperCase().padStart(5, '0'),
+                    data: blockData.map(b => b.toString(16).toUpperCase().padStart(2, '0'))
+                });
+            }
+            blockStart = -1;
+            blockData = [];
+        };
+
+        for (let addr = 0; addr < en.mem.length; addr += CHUNK) {
+            const end = Math.min(addr + CHUNK, en.mem.length);
+            let hasNonZero = false;
+            for (let i = addr; i < end; i++) {
+                if (en.mem[i] !== 0) { hasNonZero = true; break; }
+            }
+            if (hasNonZero) {
+                if (blockStart < 0) blockStart = addr;
+                for (let i = addr; i < end; i++) blockData.push(en.mem[i]);
+            } else {
+                flushBlock();
+            }
+        }
+        flushBlock();
+
+        const state = {
+            description: `Saved at CS:IP ${toHex(en.reg.CS)}:${toHex(en.reg.IP)} on ${new Date().toISOString()}`,
+            registers: Object.fromEntries(
+                Object.entries(en.reg).map(([k, v]) => [k, v.toString(16).toUpperCase().padStart(4, '0')])
+            ),
+            flags: Object.fromEntries(
+                Object.entries(en.flags).map(([k, v]) => [k, v ? 1 : 0])
+            ),
+            vga: { cursorX: en.cursorX, cursorY: en.cursorY },
+            memory: memBlocks
+        };
+
+        const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `8086state_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog(`💾 Đã lưu state JSON (${memBlocks.length} memory blocks)`);
     };
 
     const handleRegChange = (reg, valStr) => {
@@ -1197,7 +1255,7 @@ export default function Emulator8086() {
                 <HeaderControls
                     isRunning={isRunning} initAudio={initAudio}
                     bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset}
-                    toggleRun={toggleRun} stepUI={stepUI} loadStateFromJson={loadStateFromJson}
+                    toggleRun={toggleRun} stepUI={stepUI} loadStateFromJson={loadStateFromJson} saveStateToJson={saveStateToJson}
                 />
 
                 {errorMessage && (
