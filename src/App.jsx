@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Assembler8086 } from './Assembler8086.js';
 
 // ==========================================
 // 1. CONSTANTS & UTILITIES
@@ -27,37 +28,33 @@ const INITIAL_SP     = 0xFFFE;  // Initial stack pointer value
 const PC_TIMER_FREQ  = 1193182; // PC Timer base frequency in Hz (1.193182 MHz)
 const KBD_BUF_ADDR   = 0x0400;  // BIOS keyboard buffer address
 
-const DEFAULT_CODE = `; --- DEMO: MULTICOLOR HELLO 8086 ---
-MOV AX, 0x0000
-MOV DS, AX
+const DEFAULT_CODE = `ORG 100h
 
-; Store string and colors in RAM (Data Segment)
-; Word structure: [8-bit Color Attribute][8-bit ASCII Code]
-MOV WORD [0], 0x0C48 ; 'H' (Light Red)
-MOV WORD [2], 0x0E65 ; 'e' (Yellow)
-MOV WORD [4], 0x0A6C ; 'l' (Light Green)
-MOV WORD [6], 0x0B6C ; 'l' (Light Cyan)
-MOV WORD [8], 0x096F ; 'o' (Light Blue)
-MOV WORD [10], 0x0020 ; ' ' (Space)
-MOV WORD [12], 0x0D38 ; '8' (Light Magenta)
-MOV WORD [14], 0x0C30 ; '0' (Light Red)
-MOV WORD [16], 0x0E38 ; '8' (Yellow)
-MOV WORD [18], 0x0A36 ; '6' (Light Green)
+    mov ax, 0xB800
+	mov es, ax         ; ES points to Video RAM
+	mov si, hello8086  ; SI points to source data
+	mov di, 1990       ; DI points to center of screen (Row 12, Column 35)
+	mov cx, 10         ; Loop 10 times (10 characters)
 
-MOV AX, 0xB800
-MOV ES, AX         ; ES points to Video RAM
-MOV SI, 0          ; SI points to source data in RAM
-MOV DI, 1990       ; DI points to center of screen (Row 12, Column 35)
-MOV CX, 10         ; Loop 10 times (10 characters)
+print_loop:
+	lodsw              ; Load word from [SI] into AX, SI += 2
+	mov [es:di], ax    ; Write directly to VGA screen
+	add di, 2          ; Move to next screen cell
+	loop print_loop
+	hlt
 
-PRINT_LOOP:
-MOV AX, [SI]       ; Read 1 Character & Color from RAM
-MOV [ES:DI], AX    ; Write directly to VGA screen
-ADD SI, 2          ; Move to next character in RAM
-ADD DI, 2          ; Move to next screen cell
-LOOP PRINT_LOOP
-
-HLT`;
+hello8086:
+	dw 0x0C48 ; 'H' (Light Red)
+	dw 0x0E65 ; 'e' (Yellow)
+	dw 0x0A6C ; 'l' (Light Green)
+	dw 0x0B6C ; 'l' (Light Cyan)
+	dw 0x096F ; 'o' (Light Blue)
+	dw 0x0020 ; ' ' (Space)
+	dw 0x0D38 ; '8' (Light Magenta)
+	dw 0x0C30 ; '0' (Light Red)
+	dw 0x0E38 ; '8' (Yellow)
+	dw 0x0A36 ; '6' (Light Green)
+`;
 
 const toHex = (n, pad = 4) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
 const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & (ADDR_SPACE - 1);
@@ -71,7 +68,7 @@ const calcParity = (val) => {
 // 2. UI SUB-COMPONENTS
 // ==========================================
 
-function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, execMode, loadStateFromJson }) {
+function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, loadStateFromJson }) {
     return (
         <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
             <div className="flex items-center space-x-4">
@@ -81,10 +78,7 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
                 <div>
                     <h1 className="text-xl font-bold text-white tracking-tight">8086 BOOTABLE EMULATOR</h1>
                     <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-                        1MB RAM MAP | Engine: 
-                        <span className={`ml-1 ${execMode === 'BIN' ? 'text-fuchsia-400 font-bold' : 'text-indigo-400 font-bold'}`}>
-                            {execMode === 'BIN' ? 'X86 HARDWARE' : 'AST INTERPRETER'}
-                        </span>
+                        1MB RAM MAP | Engine: <span className="ml-1 text-fuchsia-400 font-bold">X86 HARDWARE</span>
                     </p>
                 </div>
             </div>
@@ -95,41 +89,18 @@ function HeaderControls({ isRunning, isAssembled, initAudio, bootFromDisk, assem
                 </label>
                 <button onClick={initAudio} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all active:scale-95">🔊 Audio</button>
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
-                <button onClick={assemble} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">Assemble</button>
+                <button onClick={assemble} disabled={isRunning} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">Assemble</button>
                 <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">🔄 Reset</button>
-                <button onClick={toggleRun} disabled={!isAssembled && execMode === 'AST'} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${(!isAssembled && execMode === 'AST') ? "bg-slate-800 opacity-50" : isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
+                <button onClick={toggleRun} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
                     {isRunning ? "Stop" : "Run"}
                 </button>
-                <button onClick={stepUI} disabled={isRunning || (!isAssembled && execMode === 'AST')} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Step</button>
+                <button onClick={stepUI} disabled={isRunning} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg disabled:opacity-50">Step</button>
             </div>
         </div>
     );
 }
 
-function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, keepMemory, setKeepMemory, activeLine, execMode }) {
-    const overlayRef = useRef(null);
-    const textareaRef = useRef(null);
-
-    const handleScroll = (e) => {
-        if (overlayRef.current) {
-            overlayRef.current.scrollTop = e.target.scrollTop;
-            overlayRef.current.scrollLeft = e.target.scrollLeft;
-        }
-    };
-
-    useEffect(() => {
-        if (activeLine >= 0 && textareaRef.current && overlayRef.current) {
-            const textarea = textareaRef.current;
-            const lineHeight = 24; 
-            const targetY = activeLine * lineHeight;
-            const containerHeight = textarea.clientHeight;
-            const currentScroll = textarea.scrollTop;
-            if (targetY < currentScroll || targetY > currentScroll + containerHeight - lineHeight * 2) {
-                textarea.scrollTop = targetY - containerHeight / 2 + lineHeight;
-            }
-        }
-    }, [activeLine]);
-
+function CodeEditor({ code, setCode, orgOffset, setOrgOffset, keepMemory, setKeepMemory }) {
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
             <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center z-20 relative">
@@ -146,34 +117,12 @@ function CodeEditor({ code, setCode, setIsAssembled, orgOffset, setOrgOffset, ke
                 </div>
             </div>
             <div className="relative flex-1 bg-slate-950/30 overflow-hidden">
-                <div ref={overlayRef} className="absolute inset-0 p-4 font-mono text-[13px] leading-[24px] whitespace-pre overflow-hidden pointer-events-none z-0">
-                    {code.split('\n').map((line, i) => (
-                        <div key={i} className={`h-[24px] w-fit min-w-full rounded-sm ${i === activeLine ? "bg-amber-500/30 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.4)]" : ""}`}>
-                            <span className="text-transparent">{line.replace(/\r/g, '') || '\u00A0'}</span>
-                        </div>
-                    ))}
-                </div>
-                <textarea 
-                    ref={textareaRef}
-                    value={code} 
-                    onChange={(ev) => { setCode(ev.target.value); setIsAssembled(false); }} 
-                    onScroll={handleScroll}
-                    disabled={execMode === 'BIN'}
-                    className={`absolute inset-0 w-full h-full bg-transparent p-4 font-mono text-[13px] focus:outline-none resize-none leading-[24px] whitespace-pre custom-scrollbar z-10 ${execMode === 'BIN' ? 'text-slate-500 cursor-not-allowed' : 'text-emerald-400'}`} 
-                    spellCheck="false" 
+                <textarea
+                    value={code}
+                    onChange={(ev) => { setCode(ev.target.value); }}
+                    className="absolute inset-0 w-full h-full bg-transparent p-4 font-mono text-[13px] focus:outline-none resize-none leading-[24px] whitespace-pre custom-scrollbar z-10 text-emerald-400"
+                    spellCheck="false"
                 />
-                
-                {execMode === 'BIN' && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-[2px] pointer-events-none transition-all duration-300">
-                        <div className="bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-400 px-5 py-4 rounded-xl shadow-2xl flex items-center space-x-3">
-                            <span className="text-2xl">🔒</span>
-                            <div className="flex flex-col">
-                                <span className="font-bold text-xs uppercase tracking-widest mb-1">Mã Assembly bị khóa</span>
-                                <span className="text-[10px] text-slate-400">Đang mô phỏng mã máy (X86 Hardware)</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -387,9 +336,9 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
                 </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-slate-800 text-[9px] text-slate-600 font-mono">
-                System Logs:
-                <div className="h-24 overflow-hidden mt-1 opacity-50 custom-scrollbar">
+            <div className="mt-4 pt-4 border-t border-slate-800 text-[10px] font-mono">
+                <span className="text-slate-400 font-bold">System Logs:</span>
+                <div className="h-24 overflow-hidden mt-1 text-emerald-400/70 custom-scrollbar">
                      {ioLogs.slice(-5).map((log, i) => <div key={i}>{">"} {log}</div>)}
                 </div>
             </div>
@@ -405,12 +354,10 @@ export default function Emulator8086() {
     const [code, setCode] = useState(DEFAULT_CODE);
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
-    const [isAssembled, setIsAssembled] = useState(false);
     const [keepMemory, setKeepMemory] = useState(false);
-    const [execMode, setExecMode] = useState("AST"); 
 
-    const [orgOffset, setOrgOffset] = useState("0x1000"); 
-    const [memSegStr, setMemSegStr] = useState("0x1000"); 
+    const [orgOffset, setOrgOffset] = useState("0x0000"); 
+    const [memSegStr, setMemSegStr] = useState("0x0000"); 
     const [memOffStr, setMemOffStr] = useState("0x0000");
     const [showMem2, setShowMem2] = useState(false);
     const [mem2SegStr, setMem2SegStr] = useState("0xB800"); 
@@ -431,8 +378,6 @@ export default function Emulator8086() {
         mem: new Uint8Array(ADDR_SPACE), 
         disk: new Uint8Array(DISK_SIZE),
         ioPorts: {},
-        insts: [],
-        labels: {},
         diskSectorSelect: 0,
         t2Div: 0,
         t2High: false,
@@ -474,7 +419,6 @@ export default function Emulator8086() {
             writeMem8Safe(e, startAddr + i, data[i]);
         }
         addLog(`Loaded ${data.length} bytes from ${filename} to ${toHex(startAddr, 5)}`);
-        setExecMode("BIN"); 
         forceRender();
     };
 
@@ -528,8 +472,6 @@ export default function Emulator8086() {
                 }
 
                 addLog(`✅ Nạp thành công State JSON ${state.description ? `(${state.description})` : ''}`);
-                setExecMode("BIN");
-                setIsAssembled(true);
                 setErrorMessage(null);
                 forceRender();
             } catch (err) {
@@ -707,280 +649,6 @@ export default function Emulator8086() {
             if (e.cursorX >= 80) { e.cursorX = 0; e.cursorY++; }
             if (e.cursorY >= 25) { scrollUp(1, 0x07, 0, 0, 24, 79); e.cursorY = 24; }
         }
-    };
-
-    // ===============================================
-    // ENGINE 1: AST INTERPRETER (Trình Thông Dịch Chuỗi)
-    // ===============================================
-    const resolveOffset = (e, s) => {
-        s = s.trim().toUpperCase();
-        if (s.startsWith("BYTE") || s.startsWith("WORD")) s = s.replace(/^(BYTE|WORD)\s+/, "");
-        s = s.replace(/^\[|\]$/g, "").trim();
-        if (s.includes(":")) s = s.split(":")[1];
-        if (e.reg[s] !== undefined) return e.reg[s];
-        if (s.startsWith("0X")) return parseInt(s, 16);
-        const parsed = parseInt(s, 10);
-        return isNaN(parsed) ? 0 : parsed;
-    };
-    const getOpVal = (e, op) => {
-        op = op.toUpperCase();
-        if (e.labels[op] !== undefined) return e.labels[op];
-        if (op.includes("[")) {
-            let seg = e.reg.DS; if (op.includes("ES:")) seg = e.reg.ES;
-            const innerMatch = op.match(/\[(.*)\]/); if (!innerMatch) return 0;
-            const phys = calcPhys(seg, resolveOffset(e, innerMatch[1]));
-            return op.includes("BYTE") ? readMem8(e, phys) : readMemWord(e, phys);
-        }
-        if (e.reg[op] !== undefined) return e.reg[op];
-        if (op.startsWith("0X")) return parseInt(op, 16);
-        const parsed = parseInt(op, 10);
-        return isNaN(parsed) ? 0 : parsed;
-    };
-    const writeOpVal = (e, dst, val) => {
-        dst = dst.toUpperCase();
-        if (dst.includes("[")) {
-            let seg = e.reg.DS; if (dst.includes("ES:")) seg = e.reg.ES;
-            const innerMatch = dst.match(/\[(.*)\]/); if (!innerMatch) return;
-            const phys = calcPhys(seg, resolveOffset(e, innerMatch[1]));
-            if (dst.includes("BYTE")) writeMem8(e, phys, val); else writeMemWord(e, phys, val & 0xFFFF);
-        } else if (e.reg[dst] !== undefined) {
-            e.reg[dst] = val & 0xFFFF;
-        } else throw new Error(`Invalid destination: ${dst}`);
-    };
-
-    const executeAstStep = () => {
-        const e = eng.current; const r = e.reg; const f = e.flags;
-        if (r.IP >= e.insts.length) return false;
-        const inst = e.insts[r.IP];
-        if (inst && inst.op === "NOP" && inst.originalLine === 0) { r.IP++; return true; }
-
-        let nextIP = r.IP + 1;
-        let op = inst.op; let args = inst.args; let prefix = null;
-
-        if (["REP", "REPE", "REPZ", "REPNE", "REPNZ"].includes(op)) {
-            if (r.CX === 0) { r.IP = nextIP; return true; }
-            prefix = op; op = args.length > 0 ? args[0].toUpperCase() : "NOP"; args = args.slice(1);
-        }
-        
-        const is8Bit = (arg) => arg && (["AL","AH","BL","BH","CL","CH","DL","DH"].includes(arg.toUpperCase()) || arg.toUpperCase().includes("BYTE"));
-
-        switch (op) {
-            case "MOV": writeOpVal(e, args[0], getOpVal(e, args[1])); break;
-            case "XCHG": { const t = getOpVal(e, args[0]); writeOpVal(e, args[0], getOpVal(e, args[1])); writeOpVal(e, args[1], t); break; }
-            case "LEA": { 
-                const innerMatch = args[1].match(/\[(.*)\]/); 
-                if (innerMatch) writeOpVal(e, args[0], resolveOffset(e, innerMatch[1])); 
-                break; 
-            }
-            case "ADD": case "ADC": case "SUB": case "SBB": case "CMP": case "AND": case "OR": case "XOR": case "TEST": {
-                const v1 = getOpVal(e, args[0]); const v2 = getOpVal(e, args[1]);
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                const signBit = is8 ? 0x80 : 0x8000;
-                let res = 0;
-                if (op === "ADD") { res = v1 + v2; f.CF = res > mask ? 1 : 0; f.OF = ((v1 ^ res) & (v2 ^ res) & signBit) ? 1 : 0; }
-                else if (op === "ADC") { res = v1 + v2 + f.CF; f.CF = res > mask ? 1 : 0; f.OF = ((v1 ^ res) & (v2 ^ res) & signBit) ? 1 : 0; }
-                else if (op === "SUB" || op === "CMP") { res = v1 - v2; f.CF = v1 < v2 ? 1 : 0; f.OF = ((v1 ^ v2) & (v1 ^ res) & signBit) ? 1 : 0; }
-                else if (op === "SBB") { res = v1 - v2 - f.CF; f.CF = v1 < (v2 + f.CF) ? 1 : 0; f.OF = ((v1 ^ v2) & (v1 ^ res) & signBit) ? 1 : 0; }
-                else if (op === "AND" || op === "TEST") { res = v1 & v2; f.CF = 0; f.OF = 0; }
-                else if (op === "OR") { res = v1 | v2; f.CF = 0; f.OF = 0; }
-                else if (op === "XOR") { res = v1 ^ v2; f.CF = 0; f.OF = 0; }
-
-                if (op !== "CMP" && op !== "TEST") writeOpVal(e, args[0], res);
-                f.ZF = (res & mask) === 0 ? 1 : 0; f.SF = (res & signBit) ? 1 : 0; f.PF = calcParity(res);
-                break;
-            }
-            case "INC": case "DEC": { 
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                const signBit = is8 ? 0x80 : 0x8000;
-                const orig = getOpVal(e, args[0]);
-                const v = op === "INC" ? orig + 1 : orig - 1; 
-                writeOpVal(e, args[0], v); 
-                f.ZF = (v & mask) === 0 ? 1 : 0; f.SF = (v & signBit) ? 1 : 0; f.PF = calcParity(v);
-                if (op === "INC") f.OF = orig === (is8 ? 0x7F : 0x7FFF) ? 1 : 0;
-                else f.OF = orig === (is8 ? 0x80 : 0x8000) ? 1 : 0;
-                break; 
-            }
-            case "NOT": {
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                writeOpVal(e, args[0], (~getOpVal(e, args[0])) & mask); 
-                break;
-            }
-            case "NEG": {
-                const is8 = is8Bit(args[0]); const mask = is8 ? 0xFF : 0xFFFF;
-                const signBit = is8 ? 0x80 : 0x8000;
-                const v = getOpVal(e, args[0]); const res = (0 - v) & mask;
-                writeOpVal(e, args[0], res);
-                f.CF = v === 0 ? 0 : 1; f.ZF = res === 0 ? 1 : 0; f.SF = (res & signBit) ? 1 : 0; f.PF = calcParity(res);
-                f.OF = v === signBit ? 1 : 0;
-                break;
-            }
-            case "MUL": case "IMUL": case "DIV": case "IDIV": {
-                const is8 = is8Bit(args[0]); const v = getOpVal(e, args[0]);
-                if (op === "MUL") {
-                    if (!is8) { const ur = (r.AX * v) >>> 0; r.AX = ur & 0xFFFF; r.DX = (ur >>> 16) & 0xFFFF; f.CF = f.OF = r.DX !== 0 ? 1 : 0; }
-                    else { const ur = (r.AX & 0xFF) * v; r.AX = ur & 0xFFFF; f.CF = f.OF = (ur & 0xFF00) !== 0 ? 1 : 0; }
-                } else if (op === "IMUL") {
-                    if (!is8) { const sr = ((r.AX<<16)>>16) * ((v<<16)>>16); r.AX = sr & 0xFFFF; r.DX = (sr>>16) & 0xFFFF; f.CF = f.OF = ((r.AX&0x8000)?r.DX===0xFFFF:r.DX===0)?0:1; }
-                    else { const sr = (((r.AX&0xFF)<<24)>>24) * ((v<<24)>>24); r.AX = sr & 0xFFFF; f.CF=f.OF=((sr&0x80)?(sr&0xFF00)===0xFF00:(sr&0xFF00)===0)?0:1; }
-                } else if (op === "DIV") {
-                    if (v === 0) throw new Error("Divide by zero");
-                    if (!is8) { const dvnd = (r.DX * 0x10000) + r.AX; const q = Math.floor(dvnd/v); if(q>0xFFFF) throw new Error("Overflow"); r.AX = q&0xFFFF; r.DX = dvnd%v; }
-                    else { const dvnd = r.AX; const q = Math.floor(dvnd/v); if(q>0xFF) throw new Error("Overflow"); r.AX = ((dvnd%v)<<8) | (q&0xFF); }
-                } else if (op === "IDIV") {
-                    if (v === 0) throw new Error("Divide by zero");
-                    if (!is8) { const dvnd = (r.DX<<16)|r.AX; const ds = (v<<16)>>16; const q = Math.trunc(dvnd/ds); if(q>32767||q<-32768) throw new Error("Overflow"); r.AX=q&0xFFFF; r.DX=dvnd%ds; }
-                    else { const dvnd = (r.AX<<16)>>16; const ds = (v<<24)>>24; const q = Math.trunc(dvnd/ds); if(q>127||q<-128) throw new Error("Overflow"); r.AX=(((dvnd%ds)&0xFF)<<8)|(q&0xFF); }
-                }
-                break;
-            }
-            case "SHL": case "SAL": case "SHR": case "SAR": case "ROL": case "ROR": case "RCL": case "RCR": {
-                const is8 = is8Bit(args[0]); const maxVal = is8 ? 0xFF : 0xFFFF; const msbMask = is8 ? 0x80 : 0x8000; const shiftAmt = is8 ? 7 : 15;
-                let count = 1; if(args.length > 1) count = args[1].toUpperCase()==="CL" ? (r.CX&0xFF) : getOpVal(e, args[1]);
-                count &= 0x1F;
-                if(count > 0) {
-                    let val = getOpVal(e, args[0]);
-                    for(let i=0; i<count; i++) {
-                        const msb = (val & msbMask) !== 0; const lsb = (val & 1) !== 0;
-                        if(op==="SHL"||op==="SAL") { f.CF = msb?1:0; val = (val<<1)&maxVal; }
-                        else if(op==="SHR") { f.CF = lsb?1:0; val = (val>>1)&maxVal; }
-                        else if(op==="SAR") { f.CF = lsb?1:0; val = (val&msbMask) | ((val>>1)&(maxVal>>1)); }
-                        else if(op==="ROL") { f.CF = msb?1:0; val = ((val<<1)|f.CF)&maxVal; }
-                        else if(op==="ROR") { f.CF = lsb?1:0; val = ((val>>1)|(f.CF<<shiftAmt))&maxVal; }
-                        else if(op==="RCL") { const oCF=f.CF; f.CF=msb?1:0; val=((val<<1)|oCF)&maxVal; }
-                        else if(op==="RCR") { const oCF=f.CF; f.CF=lsb?1:0; val=((val>>1)|(oCF<<shiftAmt))&maxVal; }
-                    }
-                    writeOpVal(e, args[0], val);
-                    f.ZF = val===0?1:0; f.SF = (val&msbMask)?1:0; f.PF = calcParity(val);
-                }
-                break;
-            }
-            case "CBW": r.AX = (r.AX & 0x80) ? (0xFF00 | (r.AX & 0xFF)) : (r.AX & 0xFF); break;
-            case "CWD": r.DX = (r.AX & 0x8000) ? 0xFFFF : 0x0000; break;
-            case "SAHF": {
-                const ah = (r.AX >> 8) & 0xFF;
-                f.CF = (ah & 1) ? 1 : 0; f.PF = (ah & 4) ? 1 : 0; f.AF = (ah & 16) ? 1 : 0; f.ZF = (ah & 64) ? 1 : 0; f.SF = (ah & 128) ? 1 : 0;
-                break;
-            }
-            case "LAHF": {
-                let ah = 2; if (f.CF) ah |= 1; if (f.PF) ah |= 4; if (f.AF) ah |= 16; if (f.ZF) ah |= 64; if (f.SF) ah |= 128;
-                r.AX = (r.AX & 0x00FF) | (ah << 8);
-                break;
-            }
-            case "XLAT": case "XLATB": {
-                const phys = calcPhys(r.DS, (r.BX + (r.AX & 0xFF)) & 0xFFFF);
-                r.AX = (r.AX & 0xFF00) | readMem8(e, phys);
-                break;
-            }
-            case "LDS": case "LES": {
-                let segReg = r.DS; if (args[1].includes("ES:")) segReg = r.ES;
-                const innerMatch = args[1].match(/\[(.*)\]/);
-                if (innerMatch) {
-                    const phys = calcPhys(segReg, resolveOffset(e, innerMatch[1]));
-                    const off = readMemWord(e, phys);
-                    const seg = readMemWord(e, (phys + 2) & 0xFFFFF);
-                    writeOpVal(e, args[0], off);
-                    if (op === "LDS") r.DS = seg; else r.ES = seg;
-                }
-                break;
-            }
-            case "PUSHA": { const sp = r.SP; push16(e, r.AX); push16(e, r.CX); push16(e, r.DX); push16(e, r.BX); push16(e, sp); push16(e, r.BP); push16(e, r.SI); push16(e, r.DI); break; }
-            case "POPA": { r.DI = pop16(e); r.SI = pop16(e); r.BP = pop16(e); pop16(e); r.BX = pop16(e); r.DX = pop16(e); r.CX = pop16(e); r.AX = pop16(e); break; }
-            case "LEAVE": { r.SP = r.BP; r.BP = pop16(e); break; }
-            case "PUSHF": push16(e, packFlags(e)); break;
-            case "POPF": unpackFlags(e, pop16(e)); break;
-            case "CLI": f.IF = 0; break; case "STI": f.IF = 1; break;
-            case "CLC": f.CF = 0; break; case "STC": f.CF = 1; break; case "CMC": f.CF = 1 - f.CF; break;
-            case "CLD": f.DF = 0; break; case "STD": f.DF = 1; break;
-
-            case "OUT": handleOut(getOpVal(e, args[0]), getOpVal(e, args[1])); break;
-            case "IN": writeOpVal(e, args[0], e.ioPorts[getOpVal(e, args[1])] || 0); break;
-            
-            case "JMP": nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "CALL": push16(e, nextIP); nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "RET": nextIP = pop16(e); if(args.length>0) r.SP = (r.SP + getOpVal(e, args[0])) & 0xFFFF; break;
-            case "RETF": nextIP = pop16(e); r.CS = pop16(e); if(args.length>0) r.SP = (r.SP + getOpVal(e, args[0])) & 0xFFFF; break;
-            case "IRET": nextIP = pop16(e); r.CS = pop16(e); unpackFlags(e, pop16(e)); break;
-            
-            case "PUSH": push16(e, getOpVal(e, args[0])); break;
-            case "POP": writeOpVal(e, args[0], pop16(e)); break;
-            
-            case "LOOP": r.CX = (r.CX - 1) & 0xFFFF; if (r.CX !== 0) nextIP = e.labels[args[0].toUpperCase()]; break;
-            case "LOOPE": case "LOOPZ": r.CX=(r.CX-1)&0xFFFF; if(r.CX!==0 && f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "LOOPNE": case "LOOPNZ": r.CX=(r.CX-1)&0xFFFF; if(r.CX!==0 && f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JCXZ": if(r.CX===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            
-            // Conditional Jumps
-            case "JE": case "JZ": if(f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JNE": case "JNZ": if(f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JA": case "JNBE": if(f.CF===0 && f.ZF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JAE": case "JNB": case "JNC": if(f.CF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JB": case "JNAE": case "JC": if(f.CF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JBE": case "JNA": if(f.CF===1 || f.ZF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JG": case "JNLE": if(f.ZF===0 && f.SF===f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JGE": case "JNL": if(f.SF===f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JL": case "JNGE": if(f.SF!==f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JLE": case "JNG": if(f.ZF===1 || f.SF!==f.OF) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JO": if(f.OF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JNO": if(f.OF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JP": case "JPE": if(f.PF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JNP": case "JPO": if(f.PF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JS": if(f.SF===1) nextIP=e.labels[args[0].toUpperCase()]; break;
-            case "JNS": if(f.SF===0) nextIP=e.labels[args[0].toUpperCase()]; break;
-
-            case "MOVSB": case "MOVSW": case "MOVS":
-            case "LODSB": case "LODSW": case "LODS":
-            case "STOSB": case "STOSW": case "STOS":
-            case "CMPSB": case "CMPSW": case "CMPS":
-            case "SCASB": case "SCASW": case "SCAS": {
-                const isWord = op.endsWith("W") || args.includes("WORD");
-                const sz = isWord ? 2 : 1; const dir = f.DF === 0 ? sz : -sz;
-                if (op.startsWith("MOVS")) {
-                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
-                    if (isWord) writeMemWord(e, d, readMemWord(e, s)); else writeMem8(e, d, readMem8(e, s));
-                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
-                } else if (op.startsWith("LODS")) {
-                    const s = calcPhys(r.DS, r.SI);
-                    if (isWord) r.AX = readMemWord(e, s); else r.AX = (r.AX & 0xFF00) | readMem8(e, s);
-                    r.SI = (r.SI + dir) & 0xFFFF;
-                } else if (op.startsWith("STOS")) {
-                    const d = calcPhys(r.ES, r.DI);
-                    if (isWord) writeMemWord(e, d, r.AX); else writeMem8(e, d, r.AX & 0xFF);
-                    r.DI = (r.DI + dir) & 0xFFFF;
-                } else if (op.startsWith("CMPS")) {
-                    const s = calcPhys(r.DS, r.SI); const d = calcPhys(r.ES, r.DI);
-                    const v1 = isWord ? readMemWord(e, s) : readMem8(e, s); const v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
-                    const res = v1 - v2;
-                    f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
-                    r.SI = (r.SI + dir) & 0xFFFF; r.DI = (r.DI + dir) & 0xFFFF;
-                } else if (op.startsWith("SCAS")) {
-                    const d = calcPhys(r.ES, r.DI);
-                    const v1 = isWord ? r.AX : r.AX & 0xFF; const v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
-                    const res = v1 - v2;
-                    f.ZF = (res & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0; f.CF = v1 < v2 ? 1 : 0; f.PF = calcParity(res);
-                    r.DI = (r.DI + dir) & 0xFFFF;
-                }
-                break;
-            }
-
-            case "INT": {
-                const vec = getOpVal(e, args[0]);
-                if (vec === 0x10) handleInt10(e);
-                break;
-            }
-            case "HLT": return false;
-            case "NOP": break;
-            default: throw new Error(`AST INTERPRETER ERROR: Unsupported Opcode ${op}`);
-        }
-        
-        if (prefix) {
-            r.CX = (r.CX - 1) & 0xFFFF;
-            let repeat = r.CX !== 0;
-            if (prefix === "REPE" || prefix === "REPZ") repeat = repeat && f.ZF === 1;
-            if (prefix === "REPNE" || prefix === "REPNZ") repeat = repeat && f.ZF === 0;
-            if (repeat) nextIP = r.IP;
-        }
-        r.IP = nextIP;
-        return true;
     };
 
     // ===============================================
@@ -1434,12 +1102,21 @@ export default function Emulator8086() {
     };
 
     const executeStep = () => {
-        if (execMode === "BIN") return executeBinaryStep();
-        else return executeAstStep();
+        return executeBinaryStep();
     };
 
     const stepUI = () => {
-        try { executeStep(); forceRender(); } catch (ex) { setErrorMessage(ex.message); setIsRunning(false); isRunningRef.current = false; }
+        try {
+            const e = eng.current;
+            const cs = e.reg.CS, ipBefore = e.reg.IP;
+            executeStep();
+            const ipAfter = e.reg.IP;
+            const len = ((ipAfter - ipBefore) & 0xFFFF) || 1;
+            const bytes = [];
+            for (let i = 0; i < Math.min(len, 8); i++) bytes.push(readMem8(e, calcPhys(cs, (ipBefore + i) & 0xFFFF)));
+            addLog(`${toHex(cs)}:${toHex(ipBefore)} | ${bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`);
+            forceRender();
+        } catch (ex) { setErrorMessage(ex.message); setIsRunning(false); isRunningRef.current = false; }
     };
 
     const runLoop = useCallback(() => {
@@ -1450,7 +1127,7 @@ export default function Emulator8086() {
         forceRender();
         if (ok) requestRef.current = requestAnimationFrame(runLoop);
         else { setIsRunning(false); isRunningRef.current = false; }
-    }, [execMode]);
+    }, []);
 
     const toggleRun = () => {
         if (isRunning) {
@@ -1463,29 +1140,36 @@ export default function Emulator8086() {
     };
 
     const assemble = () => {
-        setExecMode("AST"); 
-        resetCPU();
-        const e = eng.current;
-        const startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
-        e.reg.IP = startIP;
-        e.insts = new Array(startIP).fill({ op: "NOP", args: [], originalLine: 0 });
-        e.labels = {};
-        
-        const lines = code.split('\n');
-        let idx = startIP;
-        for (let i = 0; i < lines.length; i++) {
-            let l = lines[i].split(';')[0].trim();
-            if (!l) continue;
-            if (l.endsWith(':')) { e.labels[l.replace(/:$/, '').toUpperCase()] = idx; continue; }
-            const firstSpace = l.indexOf(' ');
-            let op = firstSpace !== -1 ? l.substring(0, firstSpace).trim().toUpperCase() : l.toUpperCase();
-            let argsStr = firstSpace !== -1 ? l.substring(firstSpace).trim() : "";
-            let args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
-            e.insts.push({ originalLine: i + 1, op, args });
-            idx++;
+        try {
+            setErrorMessage(null);
+            let startIP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
+            const hasOrg = /^\s*\.?org\b/im.test(code);
+            const sourceCode = hasOrg ? code : `ORG ${startIP}\n${code}`;
+            // Extract the actual ORG value from source so we load at the right address
+            if (hasOrg) {
+                const orgMatch = code.match(/^\s*\.?org\s+([0-9a-fA-Fx]+h?)\s*$/im);
+                if (orgMatch) {
+                    let v = orgMatch[1].trim();
+                    if (/h$/i.test(v)) startIP = parseInt(v.slice(0, -1), 16);
+                    else if (/^0x/i.test(v)) startIP = parseInt(v, 16);
+                    else startIP = parseInt(v, 10);
+                    if (isNaN(startIP)) startIP = 0;
+                }
+            }
+            const assembler = new Assembler8086();
+            const binary = assembler.assemble(sourceCode);
+            resetCPU();
+            const e = eng.current;
+            for (let i = 0; i < binary.length; i++) {
+                writeMem8Safe(e, startIP + i, binary[i]);
+            }
+            e.reg.CS = 0x0000;
+            e.reg.IP = startIP;
+            addLog(`Assembled: ${binary.length} bytes loaded at ${toHex(startIP, 4)} (CS:IP = 0000:${toHex(startIP, 4)})`);
+            forceRender();
+        } catch (err) {
+            setErrorMessage(`Assemble error: ${err.message}`);
         }
-        setIsAssembled(true);
-        forceRender();
     };
 
     const bootFromDisk = () => {
@@ -1494,9 +1178,8 @@ export default function Emulator8086() {
         resetCPU();
         for (let i = 0; i < SECTOR_SIZE; i++) e.mem[BOOT_LOAD_ADDR + i] = e.disk[i];
         e.reg.IP = BOOT_LOAD_ADDR; e.reg.CS = 0x0000;
-        setExecMode("BIN"); 
-        addLog(`BIOS: Booting from disk (Hardware Mode) at ${toHex(BOOT_LOAD_ADDR, 4)}...`);
-        setIsAssembled(true); setIsRunning(true); isRunningRef.current = true;
+        addLog(`BIOS: Booting from disk at ${toHex(BOOT_LOAD_ADDR, 4)}...`);
+        setIsRunning(true); isRunningRef.current = true;
         requestRef.current = requestAnimationFrame(runLoop);
     };
 
@@ -1506,21 +1189,15 @@ export default function Emulator8086() {
 
     const e = eng.current;
     const hasBootSig = e.disk[SECTOR_SIZE - 2] === 0x55 && e.disk[SECTOR_SIZE - 1] === 0xAA;
-    
-    let activeLine = -1;
-    if (execMode === "AST" && isAssembled && e.reg.IP < e.insts.length) {
-        const inst = e.insts[e.reg.IP];
-        if (inst && inst.originalLine > 0) activeLine = inst.originalLine - 1; 
-    }
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} tabIndex="0">
             <div className="max-w-[1400px] mx-auto space-y-6 outline-none">
                 
-                <HeaderControls 
-                    isRunning={isRunning} isAssembled={isAssembled} initAudio={initAudio} 
-                    bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset} 
-                    toggleRun={toggleRun} stepUI={stepUI} execMode={execMode} loadStateFromJson={loadStateFromJson}
+                <HeaderControls
+                    isRunning={isRunning} initAudio={initAudio}
+                    bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset}
+                    toggleRun={toggleRun} stepUI={stepUI} loadStateFromJson={loadStateFromJson}
                 />
 
                 {errorMessage && (
@@ -1531,7 +1208,7 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} setIsAssembled={setIsAssembled} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} activeLine={activeLine} execMode={execMode} />
+                        <CodeEditor code={code} setCode={setCode} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
