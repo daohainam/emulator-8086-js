@@ -102,8 +102,9 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
 }
 
 function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
-    return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
+    const [maximized, setMaximized] = React.useState(false);
+    const inner = (
+        <div className={maximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900" : "bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]"}>
             <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center z-20 relative">
                 <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
                 <div className="flex items-center space-x-4 text-[10px]">
@@ -122,6 +123,9 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
                             e.target.value = null;
                         }} />
                     </label>
+                    <button onClick={() => setMaximized(m => !m)} className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-all active:scale-95" title={maximized ? 'Restore' : 'Maximize'}>
+                        {maximized ? '⛶' : '⛶'}{maximized ? ' ↙' : ' ↗'}
+                    </button>
                 </div>
             </div>
             <div className="relative flex-1 bg-slate-950/30 overflow-hidden">
@@ -134,6 +138,7 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
             </div>
         </div>
     );
+    return inner;
 }
 
 function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
@@ -182,10 +187,11 @@ function DiskViewer({ diskMemory }) {
     const TOTAL_PAGES = Math.ceil(TOTAL_BLOCKS / BLOCKS_PER_PAGE);
 
     const [page, setPage] = React.useState(0);
+    const [maximized, setMaximized] = React.useState(false);
     const pageStart = page * BLOCKS_PER_PAGE;
 
     return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40">
+        <div className={maximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900" : "bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40"}>
             <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center gap-2">
                 <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono whitespace-nowrap">Virtual Disk</h2>
                 <div className="flex items-center gap-2 ml-auto">
@@ -214,9 +220,14 @@ function DiskViewer({ diskMemory }) {
                         disabled={page === TOTAL_PAGES - 1}
                         className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-30 transition-colors font-bold"
                     >▶</button>
+                    <button
+                        onClick={() => setMaximized(m => !m)}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors font-bold"
+                        title={maximized ? 'Restore' : 'Maximize'}
+                    >{maximized ? '↙ Restore' : '↗ Max'}</button>
                 </div>
             </div>
-            <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
+            <div className={`p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar gap-2 ${maximized ? 'grid grid-cols-8' : 'grid grid-cols-4'}`}>
                 {Array.from({ length: BLOCKS_PER_PAGE }).map((_, i) => {
                     const absBlock = pageStart + i;
                     const diskOff = absBlock * BLOCK_SIZE;
@@ -239,6 +250,7 @@ function DiskViewer({ diskMemory }) {
 }
 
 function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegStr, memOffStr, setMemOffStr, hasToggle = false, isToggled = false, onToggle, onMemoryChange, isRunning, onLoadMemory }) {
+    const [maximized, setMaximized] = React.useState(false);
     const seg = parseInt(memSegStr.replace(/0x/i, ''), 16) || 0;
     const off = parseInt(memOffStr.replace(/0x/i, ''), 16) || 0;
 
@@ -267,12 +279,12 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
     };
 
     const rows = [];
-    for (let r = 0; r < 8; r++) { 
+    const rowCount = maximized ? 32 : 8;
+    for (let r = 0; r < rowCount; r++) { 
         const rowOff = (off + r * 16) & 0xFFFF;
         const rowPhys = calcPhys(seg, rowOff);
         const bytes = [];
         const chars = [];
-        
         for (let c = 0; c < 16; c++) {
             const addr = rowPhys + c;
             const val = getMemByte && getMemByte(addr); 
@@ -308,7 +320,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
     }
 
     return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-[230px]">
+        <div className={maximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900" : "bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-[230px]"}>
             <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
                 <div className="flex items-center space-x-3">
                     <h2 className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest font-mono">{title}</h2>
@@ -332,9 +344,12 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
                         <span className="mr-1 text-[11px]">📥</span> Bin Load
                         <input type="file" className="hidden" accept=".bin,.hex,.com,.exe,.txt" onChange={handleFileUpload} disabled={isRunning} />
                     </label>
+                    <button onClick={() => setMaximized(m => !m)} className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-all active:scale-95 ml-1 text-[11px]" title={maximized ? 'Restore' : 'Maximize'}>
+                        {maximized ? '↙ Restore' : '↗ Max'}
+                    </button>
                 </div>
             </div>
-            <div className="p-3 font-mono text-[11px] bg-slate-950/50 flex flex-col space-y-1.5 overflow-x-auto custom-scrollbar">
+            <div className="p-3 font-mono text-[11px] bg-slate-950/50 flex flex-col space-y-1.5 overflow-x-auto custom-scrollbar flex-1">
                 {rows}
             </div>
         </div>
