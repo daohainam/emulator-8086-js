@@ -101,16 +101,12 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
     );
 }
 
-function CodeEditor({ code, setCode, orgOffset, setOrgOffset, keepMemory, setKeepMemory }) {
+function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]">
             <div className="bg-slate-950/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center z-20 relative">
                 <h2 className="text-sm font-bold text-indigo-400 uppercase">Boot Code / Assembler</h2>
                 <div className="flex items-center space-x-4 text-[10px]">
-                    <label className="flex items-center space-x-1 text-slate-400 cursor-pointer hover:text-slate-200">
-                        <input type="checkbox" checked={keepMemory} onChange={e => setKeepMemory(e.target.checked)} className="cursor-pointer" />
-                        <span>Keep RAM</span>
-                    </label>
                     <div className="flex items-center space-x-2">
                         <span className="text-slate-500">ORG (Origin):</span>
                         <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
@@ -366,7 +362,6 @@ export default function Emulator8086() {
     const [code, setCode] = useState(DEFAULT_CODE);
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
-    const [keepMemory, setKeepMemory] = useState(false);
 
     const [orgOffset, setOrgOffset] = useState("0x0000"); 
     const [memSegStr, setMemSegStr] = useState("0x0000"); 
@@ -567,7 +562,7 @@ export default function Emulator8086() {
         e.reg.SP = INITIAL_SP;
         e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        if (!keepMemory) e.mem.fill(0); 
+        e.mem.fill(0);
         e.cursorX = 0;
         e.cursorY = 0;
         setErrorMessage(null);
@@ -1277,7 +1272,7 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} orgOffset={orgOffset} setOrgOffset={setOrgOffset} keepMemory={keepMemory} setKeepMemory={setKeepMemory} />
+                        <CodeEditor code={code} setCode={setCode} orgOffset={orgOffset} setOrgOffset={setOrgOffset} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
