@@ -12,7 +12,7 @@ const DOS_COLORS = [
 // --- HARDWARE CONSTANTS ---
 const ADDR_SPACE     = 1048576; // Total address space (1 MB)
 const RAM_SIZE       = 65536;   // Main RAM size (64 KB)
-const DISK_SIZE      = 1048576; // Virtual disk size (1 MB)
+const DISK_SIZE      = 131072;  // Virtual disk size (128 KB)
 const SECTOR_SIZE    = 512;     // Standard disk sector size
 
 const VGA_BASE       = 0xB8000; // VGA text mode VRAM base address
@@ -176,24 +176,63 @@ function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
 }
 
 function DiskViewer({ diskMemory }) {
+    const BLOCKS_PER_PAGE = 64;
+    const BLOCK_SIZE = 16;
+    const TOTAL_BLOCKS = Math.floor(diskMemory.length / BLOCK_SIZE);
+    const TOTAL_PAGES = Math.ceil(TOTAL_BLOCKS / BLOCKS_PER_PAGE);
+
+    const [page, setPage] = React.useState(0);
+    const pageStart = page * BLOCKS_PER_PAGE;
+
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40">
-            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (First 64 blocks × 16B)</h2>
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center gap-2">
+                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono whitespace-nowrap">Virtual Disk</h2>
+                <div className="flex items-center gap-2 ml-auto">
+                    <button
+                        onClick={() => setPage(p => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-30 transition-colors font-bold"
+                    >◀</button>
+                    <select
+                        value={page}
+                        onChange={e => setPage(Number(e.target.value))}
+                        className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-[10px] font-mono focus:outline-none focus:border-amber-500"
+                    >
+                        {Array.from({ length: TOTAL_PAGES }).map((_, p) => {
+                            const blkStart = p * BLOCKS_PER_PAGE;
+                            const byteStart = blkStart * BLOCK_SIZE;
+                            return (
+                                <option key={p} value={p}>
+                                    {`Pg ${p}  0x${byteStart.toString(16).toUpperCase().padStart(5, '0')}–0x${(byteStart + BLOCKS_PER_PAGE * BLOCK_SIZE - 1).toString(16).toUpperCase().padStart(5, '0')}`}
+                                </option>
+                            );
+                        })}
+                    </select>
+                    <button
+                        onClick={() => setPage(p => Math.min(TOTAL_PAGES - 1, p + 1))}
+                        disabled={page === TOTAL_PAGES - 1}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-30 transition-colors font-bold"
+                    >▶</button>
+                </div>
             </div>
             <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
-                {Array.from({ length: 64 }).map((_, i) => (
-                    <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
-                        <span className="text-slate-600 mb-1">SEC {i.toString().padStart(2, '0')}</span>
-                        <div className="flex flex-wrap gap-1">
-                            {Array.from({ length: 16 }).map((_, b) => (
-                                <span key={b} className={diskMemory[i * 16 + b] !== 0 ? "text-amber-400" : "text-slate-900"}>
-                                    {diskMemory[i * 16 + b].toString(16).toUpperCase().padStart(2, '0')}
-                                </span>
-                            ))}
+                {Array.from({ length: BLOCKS_PER_PAGE }).map((_, i) => {
+                    const absBlock = pageStart + i;
+                    const diskOff = absBlock * BLOCK_SIZE;
+                    return (
+                        <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
+                            <span className="text-slate-600 mb-1">BLK {absBlock.toString(16).toUpperCase().padStart(4, '0')}</span>
+                            <div className="flex flex-wrap gap-1">
+                                {Array.from({ length: BLOCK_SIZE }).map((_, b) => (
+                                    <span key={b} className={diskMemory[diskOff + b] !== 0 ? "text-amber-400" : "text-slate-900"}>
+                                        {(diskMemory[diskOff + b] || 0).toString(16).toUpperCase().padStart(2, '0')}
+                                    </span>
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
