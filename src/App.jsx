@@ -12,7 +12,7 @@ const DOS_COLORS = [
 // --- HARDWARE CONSTANTS ---
 const ADDR_SPACE     = 1048576; // Total address space (1 MB)
 const RAM_SIZE       = 65536;   // Main RAM size (64 KB)
-const DISK_SIZE      = 65536;   // Virtual disk size (64 KB)
+const DISK_SIZE      = 1048576; // Virtual disk size (1 MB)
 const SECTOR_SIZE    = 512;     // Standard disk sector size
 
 const VGA_BASE       = 0xB8000; // VGA text mode VRAM base address
@@ -179,10 +179,10 @@ function DiskViewer({ diskMemory }) {
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40">
             <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (Sector 0-31)</h2>
+                <h2 className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Virtual Disk (First 64 blocks × 16B)</h2>
             </div>
             <div className="p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar grid grid-cols-4 gap-2">
-                {Array.from({ length: 32 }).map((_, i) => (
+                {Array.from({ length: 64 }).map((_, i) => (
                     <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
                         <span className="text-slate-600 mb-1">SEC {i.toString().padStart(2, '0')}</span>
                         <div className="flex flex-wrap gap-1">
@@ -715,6 +715,102 @@ export default function Emulator8086() {
         }
     };
 
+    const handleInt13 = (e) => {
+        const ah = (e.reg.AX >> 8) & 0xFF;
+        const al = e.reg.AX & 0xFF;
+        const dl = e.reg.DX & 0xFF;
+
+        // Only handle first hard disk (0x80)
+        if (dl !== 0x80) {
+            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0100; // AH=01 (invalid parameter)
+            e.flags.CF = 1;
+            return;
+        }
+
+        const TOTAL_SECTORS = Math.floor(DISK_SIZE / SECTOR_SIZE); // 128 sectors
+        // CHS geometry: 1 head, 1 track per head, TOTAL_SECTORS sectors/track (simplified flat)
+        const HEADS = 1;
+        const SECTORS_PER_TRACK = 63; // standard max
+        const CYLINDERS = Math.ceil(TOTAL_SECTORS / (HEADS * SECTORS_PER_TRACK));
+
+        if (ah === 0x00) {
+            // Reset disk system — return success
+            e.reg.AX = (e.reg.AX & 0x00FF); // AH=0 (success)
+            e.flags.CF = 0;
+        } else if (ah === 0x01) {
+            // Get status of last operation — return success
+            e.reg.AX = (e.reg.AX & 0x00FF); // AH=0 (success)
+            e.flags.CF = 0;
+        } else if (ah === 0x02) {
+            // Read sectors: AL=count, CH=cyl, CL=sector(1-based), DH=head, ES:BX=buffer
+            const count = al;
+            const cl = e.reg.CX & 0xFF;
+            const ch = (e.reg.CX >> 8) & 0xFF;
+            const dh = (e.reg.DX >> 8) & 0xFF;
+            const sector = (cl & 0x3F);           // bits 0-5 of CL
+            const cylinder = ch | ((cl & 0xC0) << 2); // CH + bits 6-7 of CL
+            const head = dh;
+
+            const lba = (cylinder * HEADS + head) * SECTORS_PER_TRACK + (sector - 1);
+            const diskOffset = lba * SECTOR_SIZE;
+
+            if (sector === 0 || diskOffset < 0 || diskOffset + count * SECTOR_SIZE > DISK_SIZE) {
+                e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 (sector not found)
+                e.flags.CF = 1;
+                return;
+            }
+
+            const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
+            for (let i = 0; i < count * SECTOR_SIZE; i++) {
+                writeMem8Safe(e, (bufAddr + i) & (ADDR_SPACE - 1), e.disk[diskOffset + i]);
+            }
+            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0000; // AH=0 (success), AL preserved as sectors read
+            e.flags.CF = 0;
+        } else if (ah === 0x03) {
+            // Write sectors: AL=count, CH=cyl, CL=sector(1-based), DH=head, ES:BX=buffer
+            const count = al;
+            const cl = e.reg.CX & 0xFF;
+            const ch = (e.reg.CX >> 8) & 0xFF;
+            const dh = (e.reg.DX >> 8) & 0xFF;
+            const sector = (cl & 0x3F);
+            const cylinder = ch | ((cl & 0xC0) << 2);
+            const head = dh;
+
+            const lba = (cylinder * HEADS + head) * SECTORS_PER_TRACK + (sector - 1);
+            const diskOffset = lba * SECTOR_SIZE;
+
+            if (sector === 0 || diskOffset < 0 || diskOffset + count * SECTOR_SIZE > DISK_SIZE) {
+                e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 (sector not found)
+                e.flags.CF = 1;
+                return;
+            }
+
+            const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
+            for (let i = 0; i < count * SECTOR_SIZE; i++) {
+                e.disk[diskOffset + i] = readMem8(e, (bufAddr + i) & (ADDR_SPACE - 1));
+            }
+            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0000; // AH=0 (success)
+            e.flags.CF = 0;
+        } else if (ah === 0x08) {
+            // Get drive parameters
+            e.reg.AX = 0x0000; // AH=0 success
+            e.reg.BX = 0x0000;
+            e.reg.CX = ((CYLINDERS - 1) << 8) | SECTORS_PER_TRACK; // CH=max cyl, CL=max sector
+            e.reg.DX = ((HEADS - 1) << 8) | 0x01; // DH=max head, DL=number of drives
+            e.flags.CF = 0;
+        } else if (ah === 0x15) {
+            // Get disk type
+            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0300; // AH=03 (hard disk present)
+            e.reg.CX = (TOTAL_SECTORS >> 16) & 0xFFFF;
+            e.reg.DX = TOTAL_SECTORS & 0xFFFF;
+            e.flags.CF = 0;
+        } else {
+            // Other functions — return success
+            e.reg.AX = (e.reg.AX & 0x00FF); // AH=0
+            e.flags.CF = 0;
+        }
+    };
+
     // ===============================================
     // ENGINE 2: TRUE HARDWARE X86 DECODER (Lõi Nhị phân)
     // ===============================================
@@ -1108,6 +1204,7 @@ export default function Emulator8086() {
         if (op === 0xCD) {
             const iNum = fetch8();
             if (iNum === 0x10) handleInt10(e);
+            else if (iNum === 0x13) handleInt13(e);
             else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
             return true;
         }
