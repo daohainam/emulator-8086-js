@@ -975,6 +975,13 @@ export default function Emulator8086() {
 
         if (op >= 0x50 && op <= 0x57) { push16(e, getReg16(op-0x50)); return true; } // PUSH r16
         if (op >= 0x58 && op <= 0x5F) { setReg16(op-0x58, pop16(e)); return true; } // POP r16
+        if (op === 0x06) { push16(e, e.reg.ES); return true; } // PUSH ES
+        if (op === 0x07) { e.reg.ES = pop16(e); return true; } // POP ES
+        if (op === 0x0E) { push16(e, e.reg.CS); return true; } // PUSH CS
+        if (op === 0x16) { push16(e, e.reg.SS); return true; } // PUSH SS
+        if (op === 0x17) { e.reg.SS = pop16(e); return true; } // POP SS
+        if (op === 0x1E) { push16(e, e.reg.DS); return true; } // PUSH DS
+        if (op === 0x1F) { e.reg.DS = pop16(e); return true; } // POP DS
         if (op === 0x60) { const sp = e.reg.SP; push16(e, e.reg.AX); push16(e, e.reg.CX); push16(e, e.reg.DX); push16(e, e.reg.BX); push16(e, sp); push16(e, e.reg.BP); push16(e, e.reg.SI); push16(e, e.reg.DI); return true; } // PUSHA
         if (op === 0x61) { e.reg.DI = pop16(e); e.reg.SI = pop16(e); e.reg.BP = pop16(e); pop16(e); e.reg.BX = pop16(e); e.reg.DX = pop16(e); e.reg.CX = pop16(e); e.reg.AX = pop16(e); return true; } // POPA
         if (op === 0xC9) { e.reg.SP = e.reg.BP; e.reg.BP = pop16(e); return true; } // LEAVE
