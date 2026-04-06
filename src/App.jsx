@@ -404,8 +404,8 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
 
             <div className="mt-4 pt-4 border-t border-slate-800 text-[10px] font-mono">
                 <span className="text-slate-400 font-bold">System Logs:</span>
-                <div className="h-24 overflow-hidden mt-1 text-emerald-400/70 custom-scrollbar">
-                     {ioLogs.slice(-5).map((log, i) => <div key={i}>{">"} {log}</div>)}
+                <div className="h-40 overflow-y-auto mt-1 text-emerald-400/70 custom-scrollbar">
+                     {ioLogs.map((log, i) => <div key={i}>{">"} {log}</div>)}
                 </div>
             </div>
         </div>
@@ -453,7 +453,7 @@ export default function Emulator8086() {
         cursorY: 0
     });
 
-    const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-20));
+    const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-200));
 
     // ===============================================
     // CORE: MEMORY MANAGER
