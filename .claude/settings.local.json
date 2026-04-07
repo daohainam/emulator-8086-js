@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(npm run:*)",
+      "Bash(grep -E \"^\\(C:|✖|$\\)\")"
     ]
   }
 }

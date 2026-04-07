@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Assembler8086 } from './Assembler8086.js';
+import { IOBus } from './devices/IOBus.js';
+import { NullDevice } from './devices/NullDevice.js';
+import { SpeakerDevice } from './devices/SpeakerDevice.js';
+import { DiskDevice } from './devices/DiskDevice.js';
+import { KeyboardDevice } from './devices/KeyboardDevice.js';
 
 // ==========================================
 // 1. CONSTANTS & UTILITIES
@@ -25,7 +30,6 @@ const BIOS_SIZE      = 32768;   // BIOS ROM size (32 KB)
 
 const BOOT_LOAD_ADDR = 0x7C00;  // BIOS boot sector load address
 const INITIAL_SP     = 0xFFFE;  // Initial stack pointer value
-const PC_TIMER_FREQ  = 1193182; // PC Timer base frequency in Hz (1.193182 MHz)
 const KBD_BUF_ADDR   = 0x0400;  // BIOS keyboard buffer address
 
 const DEFAULT_CODE = `ORG 100h
@@ -356,7 +360,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
     );
 }
 
-function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, packFlags, hasBootSig, ioLogs, prevRegs }) {
+function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, packFlags, hasBootSig, ioLogs, prevRegs, speakerRef }) {
     const e = eng.current;
     const prev = prevRegs;
     const [logMaximized, setLogMaximized] = React.useState(false);
@@ -399,7 +403,7 @@ function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, pac
                 <div className="text-[9px] font-bold text-slate-500 uppercase mb-2">BIOS Status</div>
                 <div className="text-[10px] space-y-1">
                     <div className="flex justify-between"><span>Boot Sig:</span> <span className={hasBootSig ? "text-emerald-500" : "text-red-500"}>{hasBootSig ? "0xAA55" : "MISSING"}</span></div>
-                    <div className="flex justify-between"><span>Audio:</span> <span className={e.beeping ? "text-amber-400" : "text-slate-600"}>{e.beeping ? "ON" : "OFF"}</span></div>
+                    <div className="flex justify-between"><span>Audio:</span> <span className={speakerRef.current?.beeping ? "text-amber-400" : "text-slate-600"}>{speakerRef.current?.beeping ? "ON" : "OFF"}</span></div>
                 </div>
             </div>
 
@@ -443,18 +447,14 @@ export default function Emulator8086() {
     const prevRegsRef = useRef(null);
     const audioCtxRef = useRef(null);
     const oscRef = useRef(null);
+    const busRef = useRef(null);
+    const speakerRef = useRef(null);
 
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(ADDR_SPACE), 
+        mem: new Uint8Array(ADDR_SPACE),
         disk: new Uint8Array(DISK_SIZE),
-        ioPorts: {},
-        diskSectorSelect: 0,
-        t2Div: 0,
-        t2High: false,
-        freq: 0,
-        beeping: false,
         cursorX: 0,
         cursorY: 0
     });
@@ -646,16 +646,11 @@ export default function Emulator8086() {
         e.reg.SP = INITIAL_SP;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         e.mem.fill(0);
-        e.ioPorts = {};
-        e.t2Div = 0;
-        e.t2High = false;
-        e.freq = 0;
-        e.beeping = false;
         e.cursorX = 0;
         e.cursorY = 0;
+        if (busRef.current) busRef.current.reset();
         setErrorMessage(null);
         setIoLogs([]);
-        stopAudio();
     };
 
     const initAudio = () => {
@@ -685,29 +680,26 @@ export default function Emulator8086() {
     const handleKeyDown = (e) => {
         if (e.key.length === 1) {
             writeMem8Safe(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
-            eng.current.ioPorts[0x60] = e.key.charCodeAt(0);
+            busRef.current.poke(0x60, e.key.charCodeAt(0));
             forceRender();
         }
     };
 
-    const handleOut = (port, val) => {
-        const e = eng.current;
-        if (port === 0x70) e.diskSectorSelect = val % 256;
-        if (port === 0x71) {
-            const rAddr = calcPhys(e.reg.DS, e.reg.BX); const dAddr = e.diskSectorSelect * 16;
-            if (val === 1) for(let i=0; i<16; i++) writeMem8Safe(e, rAddr + i, e.disk[dAddr + i]);
-            if (val === 2) for(let i=0; i<16; i++) e.disk[dAddr + i] = readMem8(e, rAddr + i);
-        }
-        if (port === 0x42) {
-            if (!e.t2High) { e.t2Div = val; e.t2High = true; }
-            else { e.t2Div |= (val << 8); e.t2High = false; if (e.t2Div > 0) e.freq = PC_TIMER_FREQ / e.t2Div; }
-        }
-        if (port === 0x61) {
-            const enable = (val & 0x03) === 0x03;
-            if (enable && !e.beeping) { e.beeping = true; playBeep(e.freq); } else if (!enable && e.beeping) { e.beeping = false; stopAudio(); }
-        }
-        addLog(`OUT 0x${port.toString(16).toUpperCase()}: 0x${val.toString(16).toUpperCase()}`);
-    };
+    // Initialize I/O bus and devices
+    if (!busRef.current) {
+        const bus = new IOBus();
+        const speaker = new SpeakerDevice();
+        speaker.playBeep = playBeep;
+        speaker.stopAudio = stopAudio;
+        bus.register(new NullDevice());
+        bus.register(speaker);
+        bus.register(new DiskDevice());
+        bus.register(new KeyboardDevice());
+        bus.attach(eng.current);
+        bus.onLog = addLog;
+        busRef.current = bus;
+        speakerRef.current = speaker;
+    }
 
     const packFlags = (e) => {
         const f = e.flags; let r = 0;
@@ -883,7 +875,7 @@ export default function Emulator8086() {
     };
 
     // ===============================================
-    // ENGINE 2: TRUE HARDWARE X86 DECODER (Lõi Nhị phân)
+    // ENGINE 2: TRUE HARDWARE X86 DECODER
     // ===============================================
     const executeBinaryStep = () => {
         const e = eng.current;
@@ -1189,22 +1181,26 @@ export default function Emulator8086() {
         if (op === 0x9F) { let ah=2; if(e.flags.CF)ah|=1; if(e.flags.PF)ah|=4; if(e.flags.AF)ah|=16; if(e.flags.ZF)ah|=64; if(e.flags.SF)ah|=128; e.reg.AX=(e.reg.AX&0xFF)|(ah<<8); return true; } // LAHF
         if (op === 0xD7) { const phys = calcPhys(segOv !== null ? segOv : e.reg.DS, (e.reg.BX + (e.reg.AX & 0xFF)) & 0xFFFF); e.reg.AX = (e.reg.AX & 0xFF00) | readMem8(e, phys); return true; } // XLAT
 
-        if (op === 0xE4 || op === 0xE5) { 
-            const isWord = op === 0xE5; const port = fetch8(); const val = e.ioPorts[port] || 0;
+        if (op === 0xE4 || op === 0xE5) {
+            const isWord = op === 0xE5; const port = fetch8();
+            const val = isWord ? busRef.current.readWord(port) : busRef.current.read(port);
             if (isWord) setReg16(0, val); else setReg8(0, val);
             return true;
         }
-        if (op === 0xEC || op === 0xED) { 
-            const isWord = op === 0xED; const port = e.reg.DX; const val = e.ioPorts[port] || 0;
+        if (op === 0xEC || op === 0xED) {
+            const isWord = op === 0xED; const port = e.reg.DX;
+            const val = isWord ? busRef.current.readWord(port) : busRef.current.read(port);
             if (isWord) setReg16(0, val); else setReg8(0, val);
             return true;
         }
-        if (op === 0xE6 || op === 0xE7) { 
-            const isWord = op === 0xE7; const port = fetch8(); handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
+        if (op === 0xE6 || op === 0xE7) {
+            const isWord = op === 0xE7; const port = fetch8();
+            if (isWord) busRef.current.writeWord(port, e.reg.AX); else busRef.current.write(port, e.reg.AX & 0xFF);
             return true;
         }
-        if (op === 0xEE || op === 0xEF) { 
-            const isWord = op === 0xEF; const port = e.reg.DX; handleOut(port, e.reg.AX & (isWord ? 0xFFFF : 0xFF));
+        if (op === 0xEE || op === 0xEF) {
+            const isWord = op === 0xEF; const port = e.reg.DX;
+            if (isWord) busRef.current.writeWord(port, e.reg.AX); else busRef.current.write(port, e.reg.AX & 0xFF);
             return true;
         }
         
@@ -1479,7 +1475,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-2 space-y-4">
-                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} />
+                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} speakerRef={speakerRef} />
                     </div>
                 </div>
             </div>
