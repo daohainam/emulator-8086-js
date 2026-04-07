@@ -5,6 +5,7 @@ import { NullDevice } from './devices/NullDevice.js';
 import { SpeakerDevice } from './devices/SpeakerDevice.js';
 import { DiskDevice } from './devices/DiskDevice.js';
 import { KeyboardDevice } from './devices/KeyboardDevice.js';
+import { PIC8259Device } from './devices/PIC8259Device.js';
 
 // ==========================================
 // 1. CONSTANTS & UTILITIES
@@ -449,6 +450,7 @@ export default function Emulator8086() {
     const oscRef = useRef(null);
     const busRef = useRef(null);
     const speakerRef = useRef(null);
+    const picRef = useRef(null);
 
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
@@ -681,6 +683,8 @@ export default function Emulator8086() {
         if (e.key.length === 1) {
             writeMem8Safe(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
             busRef.current.poke(0x60, e.key.charCodeAt(0));
+            // Raise IRQ1 (keyboard) on the PIC
+            if (picRef.current) picRef.current.raiseIRQ(1);
             forceRender();
         }
     };
@@ -691,14 +695,17 @@ export default function Emulator8086() {
         const speaker = new SpeakerDevice();
         speaker.playBeep = playBeep;
         speaker.stopAudio = stopAudio;
+        const pic = new PIC8259Device();
         bus.register(new NullDevice());
         bus.register(speaker);
         bus.register(new DiskDevice());
         bus.register(new KeyboardDevice());
+        bus.register(pic);
         bus.attach(eng.current);
         bus.onLog = addLog;
         busRef.current = bus;
         speakerRef.current = speaker;
+        picRef.current = pic;
     }
 
     const packFlags = (e) => {
@@ -1337,7 +1344,22 @@ export default function Emulator8086() {
     };
 
     const executeStep = () => {
-        return executeBinaryStep();
+        const result = executeBinaryStep();
+        // After each instruction, check for pending hardware interrupts
+        const e = eng.current;
+        const pic = picRef.current;
+        if (pic && e.flags.IF && pic.hasPendingInterrupt()) {
+            const vector = pic.acknowledge();
+            if (vector >= 0) {
+                push16(e, packFlags(e));
+                e.flags.IF = 0; // disable interrupts while servicing
+                push16(e, e.reg.CS);
+                push16(e, e.reg.IP);
+                e.reg.IP = readMemWord(e, calcPhys(0, vector * 4));
+                e.reg.CS = readMemWord(e, calcPhys(0, vector * 4 + 2));
+            }
+        }
+        return result;
     };
 
     const stepUI = () => {

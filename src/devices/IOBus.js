@@ -4,6 +4,7 @@ class IOBus {
         this.devices = [];
         this.portMap = new Map();
         this.engine = null;
+        this.pic = null;
         this.onLog = null;
     }
 
@@ -19,15 +20,34 @@ class IOBus {
             }
             this.portMap.get(port).push(device);
         }
+        // Auto-detect PIC device
+        if (device.constructor.name === 'PIC8259Device') {
+            this.pic = device;
+        }
+    }
+
+    raiseIRQ(irq) {
+        if (this.pic) this.pic.raiseIRQ(irq);
+    }
+
+    lowerIRQ(irq) {
+        if (this.pic) this.pic.lowerIRQ(irq);
     }
 
     read(port) {
-        return this.ports[port & 0xFFFF];
+        const p = port & 0xFFFF;
+        const interested = this.portMap.get(p);
+        if (interested) {
+            for (let i = 0; i < interested.length; i++) {
+                const val = interested[i].onRead(p, this);
+                if (val !== undefined) return val & 0xFF;
+            }
+        }
+        return this.ports[p];
     }
 
     readWord(port) {
-        const p = port & 0xFFFF;
-        return this.ports[p] | (this.ports[(p + 1) & 0xFFFF] << 8);
+        return this.read(port) | (this.read((port + 1) & 0xFFFF) << 8);
     }
 
     write(port, val) {

@@ -10,6 +10,10 @@ class IODevice {
     onWrite(_port, _val, _bus) {
     }
 
+    onRead(_port, _bus) {
+        return undefined;
+    }
+
     reset(_bus) {
     }
 }
