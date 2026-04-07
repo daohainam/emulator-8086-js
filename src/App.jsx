@@ -359,6 +359,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
 function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig, ioLogs, prevRegs }) {
     const e = eng.current;
     const prev = prevRegs;
+    const [logMaximized, setLogMaximized] = React.useState(false);
     return (
         <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 shadow-xl flex flex-col">
             <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-1">
@@ -402,10 +403,15 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
                 </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-slate-800 text-[10px] font-mono">
-                <span className="text-slate-400 font-bold">System Logs:</span>
-                <div className="h-40 overflow-y-auto mt-1 text-emerald-400/70 custom-scrollbar">
-                     {ioLogs.map((log, i) => <div key={i}>{">"} {log}</div>)}
+            <div className={logMaximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900 text-[10px] font-mono" : "mt-4 pt-4 border-t border-slate-800 text-[10px] font-mono"}>
+                <div className={`flex justify-between items-center ${logMaximized ? "px-3 py-2 border-b border-slate-800" : "mb-1"}`}>
+                    <span className="text-slate-400 font-bold">System Logs:</span>
+                    <button onClick={() => setLogMaximized(m => !m)} className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-all active:scale-95 text-[11px]" title={logMaximized ? 'Restore' : 'Maximize'}>
+                        {logMaximized ? '↙ Restore' : '↗ Max'}
+                    </button>
+                </div>
+                <div className={`overflow-y-auto text-emerald-400/70 custom-scrollbar ${logMaximized ? "flex-1 p-3" : "h-40 mt-1"}`}>
+                    {ioLogs.map((log, i) => <div key={i}>{">"} {log}</div>)}
                 </div>
             </div>
         </div>
