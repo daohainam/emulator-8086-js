@@ -356,7 +356,7 @@ function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegS
     );
 }
 
-function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig, ioLogs, prevRegs }) {
+function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, packFlags, hasBootSig, ioLogs, prevRegs }) {
     const e = eng.current;
     const prev = prevRegs;
     const [logMaximized, setLogMaximized] = React.useState(false);
@@ -386,8 +386,8 @@ function RegistersPanel({ eng, isRunning, handleRegChange, packFlags, hasBootSig
             </div>
             <div className="grid grid-cols-2 gap-1 text-[9px] uppercase font-bold border-t border-slate-800 pt-2">
                 {[["ZF","CF"],["SF","OF"],["DF","IF"],["PF","AF"]].map(([f1,f2]) => [
-                    <span key={f1} className={prev && prev.flags[f1] !== e.flags[f1] ? "text-yellow-300" : "text-slate-500"}>{f1}: {e.flags[f1]}</span>,
-                    <span key={f2} className={prev && prev.flags[f2] !== e.flags[f2] ? "text-yellow-300" : "text-slate-500"}>{f2}: {e.flags[f2]}</span>
+                    <button key={f1} onClick={() => !isRunning && handleFlagChange(f1)} disabled={isRunning} className={`text-left transition-colors ${prev && prev.flags[f1] !== e.flags[f1] ? "text-yellow-300" : e.flags[f1] ? "text-emerald-400" : "text-slate-500"} ${!isRunning ? "hover:text-white cursor-pointer" : "cursor-default"}`}>{f1}: {e.flags[f1]}</button>,
+                    <button key={f2} onClick={() => !isRunning && handleFlagChange(f2)} disabled={isRunning} className={`text-left transition-colors ${prev && prev.flags[f2] !== e.flags[f2] ? "text-yellow-300" : e.flags[f2] ? "text-emerald-400" : "text-slate-500"} ${!isRunning ? "hover:text-white cursor-pointer" : "cursor-default"}`}>{f2}: {e.flags[f2]}</button>
                 ])}
             </div>
             
@@ -615,6 +615,11 @@ export default function Emulator8086() {
         let val = parseInt(valStr.replace(/0x/i, ''), 16);
         if (isNaN(val)) val = 0;
         eng.current.reg[reg] = val & 0xFFFF;
+        forceRender();
+    };
+
+    const handleFlagChange = (flag) => {
+        eng.current.flags[flag] = eng.current.flags[flag] ? 0 : 1;
         forceRender();
     };
 
@@ -1474,7 +1479,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-2 space-y-4">
-                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} />
+                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} />
                     </div>
                 </div>
             </div>
