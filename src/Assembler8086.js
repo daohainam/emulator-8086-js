@@ -54,7 +54,7 @@ const OPCODE_TABLE = {
     'REPZ':  [{ match: [], size: () => 1, encode: () => [0xF3] }], 'REPNE': [{ match: [], size: () => 1, encode: () => [0xF2] }],
     'REPNZ': [{ match: [], size: () => 1, encode: () => [0xF2] }],
 
-    'INT': [ { match: [OpType.NUMBER], size: () => 1, encode: (ops) => { if (ops[0].value === 3) return [0xCC]; return [0xCD, ops[0].value & 0xFF]; } } ],
+    'INT': [ { match: [OpType.NUMBER], size: (ops) => (ops[0].value === 3) ? 1 : 2, encode: (ops) => { if (ops[0].value === 3) return [0xCC]; return [0xCD, ops[0].value & 0xFF]; } } ],
     'INTO': [{ match: [], size: () => 1, encode: () => [0xCE] }], 'IRET': [{ match: [], size: () => 1, encode: () => [0xCF] }],
     'RET': [ { match: [], size: () => 1, encode: () => [0xC3] }, { match: [OpType.NUMBER], size: () => 3, encode: (ops) => [0xC2, ...imm16ToBytes(ops[0].value)] } ],
     'RETF': [ { match: [], size: () => 1, encode: () => [0xCB] }, { match: [OpType.NUMBER], size: () => 3, encode: (ops) => [0xCA, ...imm16ToBytes(ops[0].value)] } ],
