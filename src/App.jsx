@@ -146,13 +146,22 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
     return inner;
 }
 
-function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
-    if (!memory) return null; 
-    
+function VGAMonitor({ memory, cs, ip, cursorX, cursorY, onKeyDown, onKeyUp }) {
+    if (!memory) return null;
+    const [focused, setFocused] = React.useState(false);
+
     return (
-        <div className="bg-slate-800 p-2 rounded-xl border-4 border-slate-700 shadow-2xl flex flex-col items-center overflow-x-auto">
+        <div
+            className={`bg-slate-800 p-2 rounded-xl border-4 shadow-2xl flex flex-col items-center overflow-x-auto outline-none transition-colors ${focused ? 'border-green-500' : 'border-slate-700'}`}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onKeyUp={onKeyUp}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            title="VGA Screen — click here and type to send keyboard input"
+        >
             <div className="w-full flex justify-between mb-2 px-2 text-[10px] text-slate-400 font-bold min-w-max">
-                <span>VGA {VGA_COLS}x{VGA_ROWS} TEXT MODE</span>
+                <span>VGA {VGA_COLS}x{VGA_ROWS} TEXT MODE{focused ? <span className="ml-2 text-green-400">⌨ KEYBOARD ACTIVE</span> : ''}</span>
                 <div className="flex space-x-2">
                      <span className="text-blue-400">CS: {toHex(cs)}</span>
                      <span className="text-amber-400">IP: {toHex(ip)}</span>
@@ -451,6 +460,8 @@ export default function Emulator8086() {
     const busRef = useRef(null);
     const speakerRef = useRef(null);
     const picRef = useRef(null);
+    const kbdBufferRef = useRef([]);  // Keyboard queue: each entry = (scanCode << 8) | charCode
+    const shiftStateRef = useRef(0);  // Bit0=RShift, Bit1=LShift, Bit2=Ctrl, Bit3=Alt
 
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
@@ -679,14 +690,76 @@ export default function Emulator8086() {
         if (oscRef.current) { try { oscRef.current.stop(); } catch (e) { } oscRef.current = null; }
     };
 
+    // IBM PC scan codes for common keys
+    const SCAN_CODES = {
+        'Escape': 0x01, '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
+        '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A, '0': 0x0B, '-': 0x0C, '=': 0x0D,
+        'Backspace': 0x0E, 'Tab': 0x0F,
+        'q': 0x10, 'w': 0x11, 'e': 0x12, 'r': 0x13, 't': 0x14, 'y': 0x15, 'u': 0x16,
+        'i': 0x17, 'o': 0x18, 'p': 0x19, '[': 0x1A, ']': 0x1B, 'Enter': 0x1C,
+        'a': 0x1E, 's': 0x1F, 'd': 0x20, 'f': 0x21, 'g': 0x22, 'h': 0x23,
+        'j': 0x24, 'k': 0x25, 'l': 0x26, ';': 0x27, "'": 0x28, '`': 0x29,
+        '\\': 0x2B, 'z': 0x2C, 'x': 0x2D, 'c': 0x2E, 'v': 0x2F, 'b': 0x30,
+        'n': 0x31, 'm': 0x32, ',': 0x33, '.': 0x34, '/': 0x35,
+        ' ': 0x39,
+        'F1': 0x3B, 'F2': 0x3C, 'F3': 0x3D, 'F4': 0x3E, 'F5': 0x3F,
+        'F6': 0x40, 'F7': 0x41, 'F8': 0x42, 'F9': 0x43, 'F10': 0x44,
+        'ArrowUp': 0x48, 'ArrowLeft': 0x4B, 'ArrowRight': 0x4D, 'ArrowDown': 0x50,
+        'Insert': 0x52, 'Delete': 0x53, 'Home': 0x47, 'End': 0x4F,
+        'PageUp': 0x49, 'PageDown': 0x51,
+    };
+    // Uppercase / shifted chars share scan code with their base key
+    const SHIFTED_SCAN = {
+        'Q':0x10,'W':0x11,'E':0x12,'R':0x13,'T':0x14,'Y':0x15,'U':0x16,'I':0x17,'O':0x18,'P':0x19,
+        'A':0x1E,'S':0x1F,'D':0x20,'F':0x21,'G':0x22,'H':0x23,'J':0x24,'K':0x25,'L':0x26,
+        'Z':0x2C,'X':0x2D,'C':0x2E,'V':0x2F,'B':0x30,'N':0x31,'M':0x32,
+        '!':0x02,'@':0x03,'#':0x04,'$':0x05,'%':0x06,'^':0x07,'&':0x08,'*':0x09,'(':0x0A,')':0x0B,
+        '_':0x0C,'+':0x0D,'{':0x1A,'}':0x1B,'|':0x2B,':':0x27,'"':0x28,'~':0x29,'<':0x33,'>':0x34,'?':0x35,
+    };
+    // Extended (non-ASCII) keys: char=0, scan in high byte
+    const EXTENDED_KEYS = new Set(['ArrowUp','ArrowLeft','ArrowRight','ArrowDown','Insert','Delete','Home','End','PageUp','PageDown','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10']);
+
     const handleKeyDown = (e) => {
+        // Track shift/ctrl/alt state
+        if (e.key === 'Shift') { shiftStateRef.current |= e.location === 2 ? 0x01 : 0x02; return; }
+        if (e.key === 'Control') { shiftStateRef.current |= 0x04; return; }
+        if (e.key === 'Alt') { shiftStateRef.current |= 0x08; return; }
+
+        let charCode = 0;
+        let scanCode = 0;
+
         if (e.key.length === 1) {
-            writeMem8Safe(eng.current, KBD_BUF_ADDR, e.key.charCodeAt(0));
-            busRef.current.poke(0x60, e.key.charCodeAt(0));
-            // Raise IRQ1 (keyboard) on the PIC
-            if (picRef.current) picRef.current.raiseIRQ(1);
-            forceRender();
+            charCode = e.key.charCodeAt(0);
+            scanCode = SCAN_CODES[e.key] || SHIFTED_SCAN[e.key] || 0;
+        } else if (e.key === 'Enter') {
+            charCode = 0x0D; scanCode = 0x1C;
+        } else if (e.key === 'Backspace') {
+            charCode = 0x08; scanCode = 0x0E;
+        } else if (e.key === 'Escape') {
+            charCode = 0x1B; scanCode = 0x01;
+        } else if (e.key === 'Tab') {
+            charCode = 0x09; scanCode = 0x0F;
+        } else if (EXTENDED_KEYS.has(e.key)) {
+            charCode = 0x00; scanCode = SCAN_CODES[e.key] || 0;
+        } else {
+            return; // Ignore modifier-only keys
         }
+
+        const entry = ((scanCode & 0xFF) << 8) | (charCode & 0xFF);
+        if (kbdBufferRef.current.length < 16) {
+            kbdBufferRef.current.push(entry);
+        }
+        writeMem8Safe(eng.current, KBD_BUF_ADDR, charCode);
+        busRef.current.poke(0x60, charCode);
+        // Raise IRQ1 (keyboard) on the PIC
+        if (picRef.current) picRef.current.raiseIRQ(1);
+        forceRender();
+    };
+
+    const handleKeyUp = (e) => {
+        if (e.key === 'Shift') { shiftStateRef.current &= e.location === 2 ? ~0x01 : ~0x02; }
+        else if (e.key === 'Control') { shiftStateRef.current &= ~0x04; }
+        else if (e.key === 'Alt') { shiftStateRef.current &= ~0x08; }
     };
 
     // Initialize I/O bus and devices
@@ -878,6 +951,30 @@ export default function Emulator8086() {
             // Other functions — return success
             e.reg.AX = (e.reg.AX & 0x00FF); // AH=0
             e.flags.CF = 0;
+        }
+    };
+
+    const handleInt16 = (e) => {
+        const ah = (e.reg.AX >> 8) & 0xFF;
+        if (ah === 0x00) {
+            // Read character — block (re-execute INT) until a key is available
+            if (kbdBufferRef.current.length === 0) {
+                e.reg.IP = (e.reg.IP - 2) & 0xFFFF; // Back up to re-execute INT 16h
+                return;
+            }
+            const entry = kbdBufferRef.current.shift();
+            e.reg.AX = entry & 0xFFFF;
+        } else if (ah === 0x01) {
+            // Check if key available — ZF=1 if none, ZF=0 if key waiting (peek, don't consume)
+            if (kbdBufferRef.current.length === 0) {
+                e.flags.ZF = 1;
+            } else {
+                e.flags.ZF = 0;
+                e.reg.AX = kbdBufferRef.current[0] & 0xFFFF;
+            }
+        } else if (ah === 0x02) {
+            // Get shift status
+            e.reg.AX = (e.reg.AX & 0xFF00) | (shiftStateRef.current & 0xFF);
         }
     };
 
@@ -1286,6 +1383,7 @@ export default function Emulator8086() {
             const iNum = fetch8();
             if (iNum === 0x10) handleInt10(e);
             else if (iNum === 0x13) handleInt13(e);
+            else if (iNum === 0x16) handleInt16(e);
             else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
             return true;
         }
@@ -1452,7 +1550,7 @@ export default function Emulator8086() {
     const hasBootSig = e.disk[SECTOR_SIZE - 2] === 0x55 && e.disk[SECTOR_SIZE - 1] === 0xAA;
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} tabIndex="0">
+        <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} tabIndex="0">
             <div className="max-w-[1400px] mx-auto space-y-6 outline-none">
                 
                 <HeaderControls
@@ -1473,7 +1571,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
-                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={e.cursorX} cursorY={e.cursorY} />
+                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={e.cursorX} cursorY={e.cursorY} onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} />
                         <MemoryViewer 
                             title="Memory View 1" 
                             getMemByte={getMemByteSafe} 
