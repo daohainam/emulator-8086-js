@@ -112,3 +112,16 @@ Key features:
 ### UI Language
 
 Internal comments and some UI labels are in Vietnamese. The default demo program (`DEFAULT_CODE`) is a NASM-compatible "Hello 8086" example that writes colored characters directly to VGA VRAM.
+
+### BIOS Interrupt simulation
+
+Refer to this document: `http://www.techhelpmanual.com/95-interrupts_and_bios_services.html` for BIOS interrupt services
+
+### Assembly samples
+
+Defaults:
+  - ORG 100h
+  - Use HLT instruction to stop program
+  - Only use interrupt 0x10, 0x13 and 0x16
+  - Prefer using VGA memory (0xB800:0x0000) to write to screen
+  
