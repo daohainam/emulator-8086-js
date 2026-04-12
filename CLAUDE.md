@@ -17,8 +17,9 @@ No test suite is configured.
 
 This is an Intel 8086 processor emulator with a web-based IDE and debugger, built with React 19 + Vite + Tailwind CSS.
 
-**The emulator is split across two source files:**
-- `src/App.jsx` — all UI components, CPU state, and the hardware binary decoder engine
+**The emulator is split across three source files:**
+- `src/App.jsx` — all UI components, state management, and the main application shell
+- `src/CPU8086.js` — the 8086 CPU emulation core: binary decoder engine, memory manager, flags, BIOS interrupt handlers (INT 10h/13h/16h), and the `executeStep` function
 - `src/Assembler8086.js` — standalone two-pass NASM-compatible x86 assembler that compiles source text to a `Uint8Array` of machine code
 
 `App.jsx` is structured in three sections marked by comments: constants/utilities, UI sub-components, and the main app + CPU core logic.
