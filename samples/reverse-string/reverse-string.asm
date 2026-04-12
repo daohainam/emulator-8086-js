@@ -1,5 +1,3 @@
-[org 0x100]          ; Điểm bắt đầu chuẩn cho chương trình COM (hoặc .bin)
-
 start:
     ; 1. Thiết lập đoạn dữ liệu và đoạn video
     mov ax, 0B800h   ; Địa chỉ đoạn của bộ nhớ video màu (VGA)
