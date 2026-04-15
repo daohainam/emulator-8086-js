@@ -182,6 +182,86 @@ function VGAMonitor({ memory, cs, ip, cursorX, cursorY, onKeyDown, onKeyUp }) {
     );
 }
 
+function KeyboardPanel({ keyboardDevice, handleKeyDown, handleKeyUp, forceRender }) {
+    const inputRef = React.useRef(null);
+    const buffer = keyboardDevice ? keyboardDevice.buffer : [];
+
+    const handleClear = () => {
+        if (keyboardDevice) keyboardDevice.buffer = [];
+        forceRender();
+    };
+
+    // Intercept keydown on the text input and route through the shared handler,
+    // then reset value so it stays empty (characters go into the device buffer, not the input).
+    const onInputKeyDown = (e) => {
+        // Prevent browser default for Tab so it routes as a key, not focus-change
+        if (e.key === 'Tab') e.preventDefault();
+        handleKeyDown(e);
+        // Clear the native input value after the key is processed
+        requestAnimationFrame(() => { if (inputRef.current) inputRef.current.value = ''; });
+    };
+
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl">
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
+                <h2 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest font-mono">⌨ Keyboard Buffer</h2>
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500 font-mono">{buffer.length}/16 entries</span>
+                    <button
+                        onClick={handleClear}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-red-700 text-slate-200 rounded transition-colors font-bold"
+                    >Clear</button>
+                </div>
+            </div>
+
+            {/* Text input — type here to send keys to the emulator */}
+            <div className="px-3 py-2 border-b border-slate-800 flex items-center gap-2">
+                <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">Type here:</span>
+                <input
+                    ref={inputRef}
+                    type="text"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[12px] text-emerald-300 font-mono focus:outline-none focus:border-cyan-500 placeholder-slate-600"
+                    placeholder="click and type…"
+                    onKeyDown={onInputKeyDown}
+                    onKeyUp={handleKeyUp}
+                    onChange={() => {}}  /* controlled — value reset via rAF */
+                    autoComplete="off" autoCorrect="off" spellCheck={false}
+                />
+            </div>
+
+            {/* Buffer contents table */}
+            <div className="overflow-y-auto max-h-36 font-mono text-[10px]">
+                {buffer.length === 0 ? (
+                    <div className="px-4 py-3 text-slate-600 italic">(empty)</div>
+                ) : (
+                    <table className="w-full">
+                        <thead>
+                            <tr className="text-slate-500 border-b border-slate-800">
+                                <th className="px-3 py-1 text-left font-bold">#</th>
+                                <th className="px-3 py-1 text-left font-bold">Char</th>
+                                <th className="px-3 py-1 text-left font-bold">Scan</th>
+                                <th className="px-3 py-1 text-left font-bold">ASCII</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {buffer.map((entry, i) => (
+                                <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/40">
+                                    <td className="px-3 py-0.5 text-slate-500">{i}</td>
+                                    <td className="px-3 py-0.5 text-amber-400">0x{entry.char.toString(16).padStart(2,'0').toUpperCase()}</td>
+                                    <td className="px-3 py-0.5 text-blue-400">0x{entry.scan.toString(16).padStart(2,'0').toUpperCase()}</td>
+                                    <td className="px-3 py-0.5 text-emerald-400">
+                                        {entry.char >= 32 && entry.char <= 126 ? `'${String.fromCharCode(entry.char)}'` : '·'}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function DiskViewer({ diskMemory }) {
     const BLOCKS_PER_PAGE = 64;
     const BLOCK_SIZE = 16;
@@ -448,8 +528,8 @@ export default function Emulator8086() {
     const busRef = useRef(null);
     const speakerRef = useRef(null);
     const picRef = useRef(null);
-    const kbdBufferRef = useRef([]);  // Keyboard queue: each entry = (scanCode << 8) | charCode
-    const shiftStateRef = useRef(0);  // Bit0=RShift, Bit1=LShift, Bit2=Ctrl, Bit3=Alt
+    const keyboardDeviceRef = useRef(null); // Ref to the KeyboardDevice instance
+    const shiftStateRef = useRef(0);        // Bit0=RShift, Bit1=LShift, Bit2=Ctrl, Bit3=Alt
 
     const eng = useRef({
         reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
@@ -721,12 +801,8 @@ export default function Emulator8086() {
             return; // Ignore modifier-only keys
         }
 
-        const entry = ((scanCode & 0xFF) << 8) | (charCode & 0xFF);
-        if (kbdBufferRef.current.length < 16) {
-            kbdBufferRef.current.push(entry);
-        }
+        keyboardDeviceRef.current.enqueue(charCode, scanCode);
         writeMem8Safe(eng.current, KBD_BUF_ADDR, charCode);
-        busRef.current.poke(0x60, charCode);
         // Raise IRQ1 (keyboard) on the PIC
         if (picRef.current) picRef.current.raiseIRQ(1);
         forceRender();
@@ -745,23 +821,25 @@ export default function Emulator8086() {
         speaker.playBeep = playBeep;
         speaker.stopAudio = stopAudio;
         const pic = new PIC8259Device();
+        const keyboard = new KeyboardDevice();
         bus.register(new NullDevice());
         bus.register(speaker);
         bus.register(new DiskDevice());
-        bus.register(new KeyboardDevice());
+        bus.register(keyboard);
         bus.register(pic);
         bus.attach(eng.current);
         bus.onLog = addLog;
         busRef.current = bus;
         speakerRef.current = speaker;
         picRef.current = pic;
+        keyboardDeviceRef.current = keyboard;
     }
 
     const getCpuContext = () => ({
         bus: busRef.current,
-        kbdBuffer: kbdBufferRef.current,
-        shiftState: shiftStateRef.current,
         pic: picRef.current,
+        keyboard: keyboardDeviceRef.current,
+        shiftState: shiftStateRef.current,
     });
 
     const executeStepLocal = () => {
@@ -880,6 +958,7 @@ export default function Emulator8086() {
 
                     <div className="lg:col-span-6 space-y-4">
                         <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={e.cursorX} cursorY={e.cursorY} onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} />
+                        <KeyboardPanel keyboardDevice={keyboardDeviceRef.current} handleKeyDown={handleKeyDown} handleKeyUp={handleKeyUp} forceRender={forceRender} />
                         <MemoryViewer 
                             title="Memory View 1" 
                             getMemByte={getMemByteSafe} 

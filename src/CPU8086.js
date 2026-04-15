@@ -211,27 +211,30 @@ const handleInt13 = (e) => {
 
 /**
  * @param {object} e - CPU engine state
- * @param {object} ctx - External context: { kbdBuffer, shiftState }
- *   kbdBuffer: array ref for keyboard queue
- *   shiftState: { current: number } ref for shift key state
+ * @param {object} ctx - External context: { keyboard, shiftState }
+ *   keyboard: KeyboardDevice instance (buffer owner)
+ *   shiftState: number — shift/ctrl/alt bitmask
  */
 const handleInt16 = (e, ctx) => {
     const ah = (e.reg.AX >> 8) & 0xFF;
+    const kbd = ctx.keyboard;
     if (ah === 0x00) {
         // Read character — block (re-execute INT) until a key is available
-        if (ctx.kbdBuffer.length === 0) {
+        const entry = kbd.peek();
+        if (!entry) {
             e.reg.IP = (e.reg.IP - 2) & 0xFFFF; // Back up to re-execute INT 16h
             return;
         }
-        const entry = ctx.kbdBuffer.shift();
-        e.reg.AX = entry & 0xFFFF;
+        kbd.dequeue();
+        e.reg.AX = ((entry.scan & 0xFF) << 8) | (entry.char & 0xFF);
     } else if (ah === 0x01) {
         // Check if key available — ZF=1 if none, ZF=0 if key waiting (peek, don't consume)
-        if (ctx.kbdBuffer.length === 0) {
+        const entry = kbd.peek();
+        if (!entry) {
             e.flags.ZF = 1;
         } else {
             e.flags.ZF = 0;
-            e.reg.AX = ctx.kbdBuffer[0] & 0xFFFF;
+            e.reg.AX = ((entry.scan & 0xFF) << 8) | (entry.char & 0xFF);
         }
     } else if (ah === 0x02) {
         // Get shift status
@@ -246,7 +249,7 @@ const handleInt16 = (e, ctx) => {
 /**
  * Decode and execute one x86 opcode.
  * @param {object} e - CPU engine state (eng.current)
- * @param {object} ctx - External context: { bus, kbdBuffer, shiftState, pic }
+ * @param {object} ctx - External context: { bus, keyboard, shiftState, pic }
  * @returns {boolean} true to continue, false to halt
  */
 const executeBinaryStep = (e, ctx) => {
@@ -711,7 +714,7 @@ const executeBinaryStep = (e, ctx) => {
 /**
  * Execute one CPU step with hardware interrupt checking.
  * @param {object} e - CPU engine state
- * @param {object} ctx - External context: { bus, kbdBuffer, shiftState, pic }
+ * @param {object} ctx - External context: { bus, keyboard, shiftState, pic }
  * @returns {boolean} true to continue, false to halt
  */
 const executeStep = (e, ctx) => {
