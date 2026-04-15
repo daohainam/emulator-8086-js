@@ -262,6 +262,81 @@ function KeyboardPanel({ keyboardDevice, handleKeyDown, handleKeyUp, forceRender
     );
 }
 
+function IOPortPanel({ bus, addLog }) {
+    const [portStr, setPortStr] = React.useState('60');
+    const [valStr, setValStr]   = React.useState('00');
+    const [lastIn, setLastIn]   = React.useState(null); // { port, val } from last IN read
+
+    const parseHex = (s, fallback = 0) => { const n = parseInt(s, 16); return isNaN(n) ? fallback : n; };
+
+    const handleOut = () => {
+        if (!bus) return;
+        const port = parseHex(portStr) & 0xFFFF;
+        const val  = parseHex(valStr)  & 0xFF;
+        bus.write(port, val);
+        addLog(`[Manual] OUT 0x${port.toString(16).toUpperCase().padStart(4,'0')}, 0x${val.toString(16).toUpperCase().padStart(2,'0')}`);
+    };
+
+    const handleIn = () => {
+        if (!bus) return;
+        const port = parseHex(portStr) & 0xFFFF;
+        const val  = bus.read(port) & 0xFF;
+        setLastIn({ port, val });
+        addLog(`[Manual]  IN 0x${port.toString(16).toUpperCase().padStart(4,'0')} → 0x${val.toString(16).toUpperCase().padStart(2,'0')}`);
+    };
+
+    const fieldCls = 'w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[12px] font-mono focus:outline-none focus:border-cyan-500';
+
+    return (
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl">
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800">
+                <h2 className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-widest font-mono">I/O Port Access</h2>
+            </div>
+            <div className="px-4 py-3 space-y-3">
+                <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                        <label className="block text-[9px] text-slate-500 font-mono mb-1">PORT (hex)</label>
+                        <input
+                            type="text" maxLength={4}
+                            value={portStr}
+                            onChange={e => setPortStr(e.target.value.replace(/[^0-9a-fA-F]/g,''))}
+                            className={`${fieldCls} text-amber-400`}
+                        />
+                    </div>
+                    <div className="flex-1">
+                        <label className="block text-[9px] text-slate-500 font-mono mb-1">VALUE (hex)</label>
+                        <input
+                            type="text" maxLength={2}
+                            value={valStr}
+                            onChange={e => setValStr(e.target.value.replace(/[^0-9a-fA-F]/g,''))}
+                            className={`${fieldCls} text-emerald-400`}
+                        />
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        onClick={handleOut}
+                        className="flex-1 px-3 py-1.5 bg-fuchsia-700 hover:bg-fuchsia-600 text-white rounded text-[11px] font-bold transition-colors active:scale-95 font-mono"
+                    >OUT →</button>
+                    <button
+                        onClick={handleIn}
+                        className="flex-1 px-3 py-1.5 bg-cyan-800 hover:bg-cyan-700 text-white rounded text-[11px] font-bold transition-colors active:scale-95 font-mono"
+                    >← IN</button>
+                </div>
+                {lastIn !== null && (
+                    <div className="text-[10px] font-mono text-center text-cyan-300 bg-slate-800 rounded px-2 py-1">
+                        IN 0x{lastIn.port.toString(16).toUpperCase().padStart(4,'0')} →{' '}
+                        <span className="text-emerald-400 font-bold">
+                            0x{lastIn.val.toString(16).toUpperCase().padStart(2,'0')}
+                        </span>
+                        {' '}({lastIn.val})
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function DiskViewer({ diskMemory }) {
     const BLOCKS_PER_PAGE = 64;
     const BLOCK_SIZE = 16;
@@ -983,6 +1058,7 @@ export default function Emulator8086() {
 
                     <div className="lg:col-span-2 space-y-4">
                         <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} speakerRef={speakerRef} />
+                        <IOPortPanel bus={busRef.current} addLog={addLog} />
                     </div>
                 </div>
             </div>
