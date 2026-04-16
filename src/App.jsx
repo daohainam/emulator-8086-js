@@ -27,7 +27,14 @@ const DOS_COLORS = [
 
 const BOOT_LOAD_ADDR = 0x7C00;  // BIOS boot sector load address
 const INITIAL_SP     = 0xFFFE;  // Initial stack pointer value
-const KBD_BUF_ADDR   = 0x0400;  // BIOS keyboard buffer address
+
+// BDA keyboard buffer — all values are physical addresses or BDA-relative offsets
+const BDA_SEG_PHYS         = 0x0400;  // Physical base of BDA segment (0x0040 << 4)
+const BDA_KBD_STATUS1_PHYS = 0x0417;  // Physical: keyboard status byte 1
+const BDA_KBD_HEAD_PHYS    = 0x041A;  // Physical: buffer head pointer
+const BDA_KBD_TAIL_PHYS    = 0x041C;  // Physical: buffer tail pointer
+const BDA_KBD_BUF_OFF      = 0x1E;   // BDA-relative offset: start of buffer
+const BDA_KBD_BUF_END_OFF  = 0x3E;   // BDA-relative offset: one past end
 
 const DEFAULT_CODE = `ORG 100h
 
@@ -792,6 +799,9 @@ export default function Emulator8086() {
         e.mem.fill(0);
         e.cursorX = 0;
         e.cursorY = 0;
+        // Initialise BDA keyboard circular buffer so head == tail (empty)
+        writeMemWord(e, BDA_KBD_HEAD_PHYS, BDA_KBD_BUF_OFF);
+        writeMemWord(e, BDA_KBD_TAIL_PHYS, BDA_KBD_BUF_OFF);
         if (busRef.current) busRef.current.reset();
         setErrorMessage(null);
         setIoLogs([]);
@@ -851,10 +861,22 @@ export default function Emulator8086() {
     const EXTENDED_KEYS = new Set(['ArrowUp','ArrowLeft','ArrowRight','ArrowDown','Insert','Delete','Home','End','PageUp','PageDown','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10']);
 
     const handleKeyDown = (e) => {
-        // Track shift/ctrl/alt state
-        if (e.key === 'Shift') { shiftStateRef.current |= e.location === 2 ? 0x01 : 0x02; return; }
-        if (e.key === 'Control') { shiftStateRef.current |= 0x04; return; }
-        if (e.key === 'Alt') { shiftStateRef.current |= 0x08; return; }
+        // Track shift/ctrl/alt state and mirror into BDA status byte
+        if (e.key === 'Shift') {
+            shiftStateRef.current |= e.location === 2 ? 0x01 : 0x02;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+            return;
+        }
+        if (e.key === 'Control') {
+            shiftStateRef.current |= 0x04;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+            return;
+        }
+        if (e.key === 'Alt') {
+            shiftStateRef.current |= 0x08;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+            return;
+        }
 
         let charCode = 0;
         let scanCode = 0;
@@ -876,17 +898,35 @@ export default function Emulator8086() {
             return; // Ignore modifier-only keys
         }
 
+        // Write entry into the BDA circular keyboard buffer.
+        // head and tail store BDA-relative offsets (0x1E–0x3C).
+        // Entry word: low byte = ASCII, high byte = scan code.
+        const tail = readMemWord(eng.current, BDA_KBD_TAIL_PHYS);
+        const nextTail = (tail + 2 >= BDA_KBD_BUF_END_OFF) ? BDA_KBD_BUF_OFF : tail + 2;
+        const head = readMemWord(eng.current, BDA_KBD_HEAD_PHYS);
+        if (nextTail !== head) { // buffer not full
+            writeMemWord(eng.current, BDA_SEG_PHYS + tail, ((scanCode & 0xFF) << 8) | (charCode & 0xFF));
+            writeMemWord(eng.current, BDA_KBD_TAIL_PHYS, nextTail);
+        }
+
+        // Also enqueue in the JS KeyboardDevice for display in the keyboard panel.
         keyboardDeviceRef.current.enqueue(charCode, scanCode);
-        writeMem8Safe(eng.current, KBD_BUF_ADDR, charCode);
         // Raise IRQ1 (keyboard) on the PIC
         if (picRef.current) picRef.current.raiseIRQ(1);
         forceRender();
     };
 
     const handleKeyUp = (e) => {
-        if (e.key === 'Shift') { shiftStateRef.current &= e.location === 2 ? ~0x01 : ~0x02; }
-        else if (e.key === 'Control') { shiftStateRef.current &= ~0x04; }
-        else if (e.key === 'Alt') { shiftStateRef.current &= ~0x08; }
+        if (e.key === 'Shift') {
+            shiftStateRef.current &= e.location === 2 ? ~0x01 : ~0x02;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+        } else if (e.key === 'Control') {
+            shiftStateRef.current &= ~0x04;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+        } else if (e.key === 'Alt') {
+            shiftStateRef.current &= ~0x08;
+            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+        }
     };
 
     // Initialize I/O bus and devices

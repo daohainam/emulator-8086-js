@@ -210,35 +210,59 @@ const handleInt13 = (e) => {
 };
 
 /**
+ * JS fallback handler for INT 0x16 when no BIOS ROM is loaded.
+ * Reads from the BDA keyboard circular buffer in memory (same layout that
+ * the ASM int16_handler in int16.asm uses) so both paths are consistent.
+ *
+ * BDA layout (segment 0x0040, physical base 0x0400):
+ *   0x0417 (phys) = BDA_KBD_STATUS1 — shift/toggle flags
+ *   0x041A (phys) = BDA_KBD_HEAD    — head pointer (BDA-relative offset)
+ *   0x041C (phys) = BDA_KBD_TAIL    — tail pointer (BDA-relative offset)
+ *   0x041E (phys) = start of 32-byte circular buffer (BDA offset 0x1E)
+ *   0x043E (phys) = one past end of buffer (BDA offset 0x3E)
+ *
+ * Entry word: low byte = ASCII code, high byte = scan code.
+ * Buffer empty when head == tail.
+ *
  * @param {object} e - CPU engine state
- * @param {object} ctx - External context: { keyboard, shiftState }
- *   keyboard: KeyboardDevice instance (buffer owner)
- *   shiftState: number — shift/ctrl/alt bitmask
  */
-const handleInt16 = (e, ctx) => {
+const handleInt16 = (e) => {
+    const BDA_BASE     = 0x0400;  // physical base of BDA segment
+    const HEAD_PHYS    = 0x041A;
+    const TAIL_PHYS    = 0x041C;
+    const STATUS1_PHYS = 0x0417;
+    const BUF_OFF_START = 0x1E;
+    const BUF_OFF_END   = 0x3E;
+
     const ah = (e.reg.AX >> 8) & 0xFF;
-    const kbd = ctx.keyboard;
-    if (ah === 0x00) {
-        // Read character — block (re-execute INT) until a key is available
-        const entry = kbd.peek();
-        if (!entry) {
-            e.reg.IP = (e.reg.IP - 2) & 0xFFFF; // Back up to re-execute INT 16h
+
+    if (ah === 0x00 || ah === 0x10) {
+        // Blocking read: re-execute INT 16h until a key is available
+        const head = readMemWord(e, HEAD_PHYS);
+        const tail = readMemWord(e, TAIL_PHYS);
+        if (head === tail) {
+            e.reg.IP = (e.reg.IP - 2) & 0xFFFF; // back up to re-execute
             return;
         }
-        kbd.dequeue();
-        e.reg.AX = ((entry.scan & 0xFF) << 8) | (entry.char & 0xFF);
-    } else if (ah === 0x01) {
-        // Check if key available — ZF=1 if none, ZF=0 if key waiting (peek, don't consume)
-        const entry = kbd.peek();
-        if (!entry) {
+        e.reg.AX = readMemWord(e, BDA_BASE + head);
+        const nextHead = (head + 2 >= BUF_OFF_END) ? BUF_OFF_START : head + 2;
+        writeMemWord(e, HEAD_PHYS, nextHead);
+    } else if (ah === 0x01 || ah === 0x11) {
+        // Non-destructive peek
+        const head = readMemWord(e, HEAD_PHYS);
+        const tail = readMemWord(e, TAIL_PHYS);
+        if (head === tail) {
             e.flags.ZF = 1;
         } else {
             e.flags.ZF = 0;
-            e.reg.AX = ((entry.scan & 0xFF) << 8) | (entry.char & 0xFF);
+            e.reg.AX = readMemWord(e, BDA_BASE + head);
         }
     } else if (ah === 0x02) {
-        // Get shift status
-        e.reg.AX = (e.reg.AX & 0xFF00) | (ctx.shiftState & 0xFF);
+        // Get shift status byte 1
+        e.reg.AX = (e.reg.AX & 0xFF00) | readMem8(e, STATUS1_PHYS);
+    } else if (ah === 0x12) {
+        // Extended shift status: AL = status1, AH = status2
+        e.reg.AX = ((readMem8(e, STATUS1_PHYS + 1)) << 8) | readMem8(e, STATUS1_PHYS);
     }
 };
 
@@ -653,7 +677,7 @@ const executeBinaryStep = (e, ctx) => {
         const iNum = fetch8();
         if (iNum === 0x10) handleInt10(e);
         else if (iNum === 0x13) handleInt13(e);
-        else if (iNum === 0x16) handleInt16(e, ctx);
+        else if (iNum === 0x16) handleInt16(e);
         else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
         return true;
     }

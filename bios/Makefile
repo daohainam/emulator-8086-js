@@ -6,7 +6,7 @@ BIOS_BIN = bios.bin
 
 all: $(BIOS_BIN)
 
-$(BIOS_BIN): $(BIOS_SRC)
+$(BIOS_BIN): $(BIOS_SRC) int16.asm
 	$(NASM) -f bin -o $@ $<
 
 clean:

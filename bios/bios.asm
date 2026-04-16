@@ -5,7 +5,7 @@
 ; Provides handlers for:
 ;   INT 0x10 - Video Services (cursor control via CRT Controller I/O ports)
 ;   INT 0x13 - Disk Services (stub)
-;   INT 0x16 - Keyboard Services (stub)
+;   INT 0x16 - Keyboard Services (BDA circular buffer; see int16.asm)
 ;
 ; INT 0x10 subfunctions implemented:
 ;   AH=0x01 – Set Cursor Shape (programs CRT ports 0x3D4/0x3D5, updates BDA)
@@ -62,6 +62,8 @@ BDA_PAGE_SIZE    equ 0x4C       ; Word: page size in bytes
 BDA_CURSOR_POS   equ 0x50       ; 8 words (one per page): low=column, high=row
 BDA_CURSOR_SHAPE equ 0x60       ; Word: low=end scan line, high=start scan line
 BDA_ACTIVE_PAGE  equ 0x62       ; Byte: active display page number
+
+; BDA keyboard buffer constants are defined in int16.asm (included at end).
 
 ; Default cursor shape for CGA 80x25 text mode (scan lines 6–7)
 DEFAULT_CURSOR_START equ 0x06
@@ -173,6 +175,16 @@ init:
     mov dx, CRT_DATA
     xor al, al
     out dx, al
+
+    ; -------------------------------------------------------------------------
+    ; Initialise BDA keyboard circular buffer
+    ; -------------------------------------------------------------------------
+    ; head = tail = BDA_KBD_BUF (0x1E) — marks the buffer as empty
+    mov word [es:BDA_KBD_HEAD], BDA_KBD_BUF
+    mov word [es:BDA_KBD_TAIL], BDA_KBD_BUF
+    ; Clear shift status bytes
+    mov byte [es:BDA_KBD_STATUS1], 0
+    mov byte [es:BDA_KBD_STATUS2], 0
 
     pop dx
     pop es
@@ -1113,13 +1125,16 @@ int13_handler:
     iret
 
 ; =============================================================================
-; INT 0x16 - Keyboard Services (stub)
-; Sets AX=1 (error), CF=1, and returns.
+; INT 0x16 - Keyboard Services (see int16.asm)
+;   AH=0x00 / 0x10 – Read Keystroke (blocking)
+;   AH=0x01 / 0x11 – Check Keystroke (non-destructive peek, returns ZF)
+;   AH=0x02         – Get Keyboard Shift Status
+;   AH=0x03         – Set Typematic Rate (stub)
+;   AH=0x05         – Push Keystroke into Buffer
+;   AH=0x12         – Extended Get Shift Status
+; Full implementation in int16.asm (included below).
 ; =============================================================================
-int16_handler:
-    mov ax, 0x0001          ; Error code
-    stc                     ; Carry flag set = error
-    iret
+%include "int16.asm"
 
 ; =============================================================================
 ; Common Interrupt Handler
