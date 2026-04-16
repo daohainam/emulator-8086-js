@@ -25,8 +25,11 @@ const DOS_COLORS = [
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
-const BOOT_LOAD_ADDR = 0x7C00;  // BIOS boot sector load address
-const INITIAL_SP     = 0xFFFE;  // Initial stack pointer value
+const BOOT_LOAD_ADDR    = 0x7C00;   // BIOS boot sector load address
+const INITIAL_SP        = 0xFFFE;   // Initial stack pointer value
+const RESET_VECTOR_PHYS = 0xFFFF0;  // Physical address of x86 reset vector (0xFFFF:0x0000)
+const BIOS_ENTRY_SEG    = 0xC000;   // BIOS ROM segment
+const BIOS_ENTRY_OFF    = 0x0003;   // BIOS ROM entry point offset
 
 // BDA keyboard buffer — all values are physical addresses or BDA-relative offsets
 const BDA_SEG_PHYS         = 0x0400;  // Physical base of BDA segment (0x0040 << 4)
@@ -782,9 +785,16 @@ export default function Emulator8086() {
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = INITIAL_SP;
-        e.reg.IP = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
+        e.reg.CS = BIOS_ENTRY_SEG;
+        e.reg.IP = BIOS_ENTRY_OFF;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         e.mem.fill(0);
+        // Write reset vector at 0xFFFF:0x0000 — JMP FAR BIOS_ENTRY_SEG:BIOS_ENTRY_OFF
+        writeMem8Safe(e, RESET_VECTOR_PHYS,     0xEA);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 1, BIOS_ENTRY_OFF & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 2, (BIOS_ENTRY_OFF >> 8) & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 3, BIOS_ENTRY_SEG & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 4, (BIOS_ENTRY_SEG >> 8) & 0xFF);
         e.cursorX = 0;
         e.cursorY = 0;
         setErrorMessage(null);
@@ -795,8 +805,16 @@ export default function Emulator8086() {
         const e = eng.current;
         Object.keys(e.reg).forEach(k => e.reg[k] = 0);
         e.reg.SP = INITIAL_SP;
+        e.reg.CS = BIOS_ENTRY_SEG;
+        e.reg.IP = BIOS_ENTRY_OFF;
         e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
         e.mem.fill(0);
+        // Write reset vector at 0xFFFF:0x0000 — JMP FAR BIOS_ENTRY_SEG:BIOS_ENTRY_OFF
+        writeMem8Safe(e, RESET_VECTOR_PHYS,     0xEA);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 1, BIOS_ENTRY_OFF & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 2, (BIOS_ENTRY_OFF >> 8) & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 3, BIOS_ENTRY_SEG & 0xFF);
+        writeMem8Safe(e, RESET_VECTOR_PHYS + 4, (BIOS_ENTRY_SEG >> 8) & 0xFF);
         e.cursorX = 0;
         e.cursorY = 0;
         // Initialise BDA keyboard circular buffer so head == tail (empty)
