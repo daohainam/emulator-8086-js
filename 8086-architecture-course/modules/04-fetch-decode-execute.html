@@ -1,0 +1,320 @@
+<section class="module" id="module-4" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">04</span>
+      <h1 class="module-title">The Heartbeat</h1>
+      <p class="module-subtitle">Fetch → Decode → Execute: the three-step drum beat every CPU lives by</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: The FDE cycle concept -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Every CPU in history runs the same three-step loop</h2>
+        <p>From the 8086 to your MacBook's M-series chip, every <span class="tooltip" data-tip="CPU stands for Central Processing Unit — the main chip that executes instructions in a computer. It's the brain of the machine.">CPU</span> runs an infinite loop called the <strong>Fetch-Decode-Execute cycle</strong>. Think of it like a music box: a tiny pin plucks one note, then the cylinder rotates to the next pin, forever.</p>
+
+        <div style="display: flex; flex-direction: column; align-items: center; gap: var(--space-6); margin-top: var(--space-8)">
+          <!-- Circular FDE visualization -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-4); width: 100%">
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-1); position: relative">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">📥</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-1)">FETCH</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Read the next byte from memory at address CS:IP. Advance IP.</p>
+              <div style="position: absolute; right: -20px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--color-accent); z-index: 1">→</div>
+            </div>
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-2); position: relative">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">🔍</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-2)">DECODE</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Identify the instruction: is it MOV? ADD? JMP? Read any extra bytes (operands).</p>
+              <div style="position: absolute; right: -20px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--color-accent); z-index: 1">→</div>
+            </div>
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-5)">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-5); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">⚡</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-5)">EXECUTE</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Perform the operation: update registers, write memory, set flags. Loop back to FETCH.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: The fetch function in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">FETCH: the first beat</h2>
+        <p>At the start of every instruction, the CPU reads the next byte from memory using <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">CS:IP</code> as the address. IP automatically advances after each read:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — executeBinaryStep</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> fetch8 = () => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> v = <span class="code-function">readMem8</span>(</span>
+<span class="code-line">    e,</span>
+<span class="code-line">    <span class="code-function">calcPhys</span>(<span class="code-property">e</span>.reg.CS, <span class="code-property">e</span>.reg.IP)</span>
+<span class="code-line">  );</span>
+<span class="code-line">  <span class="code-property">e</span>.reg.IP =</span>
+<span class="code-line">    (<span class="code-property">e</span>.reg.IP + <span class="code-number">1</span>) & <span class="code-number">0xFFFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">return</span> v;</span>
+<span class="code-line">};</span>
+<span class="code-line"><span class="code-keyword">const</span> fetch16 = () => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> lo = <span class="code-function">fetch8</span>();</span>
+<span class="code-line">  <span class="code-keyword">const</span> hi = <span class="code-function">fetch8</span>();</span>
+<span class="code-line">  <span class="code-keyword">return</span> (hi << <span class="code-number">8</span>) | lo;</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">fetch8: reads one byte from memory...</p>
+              <p class="tl">...calculate the physical address from segment CS and offset IP...</p>
+              <p class="tl">...read the byte there...</p>
+              <p class="tl">...advance IP by 1 (wrapped to 16 bits so it wraps at 65535)...</p>
+              <p class="tl">...return the byte. IP now points to the byte after the one we just read.</p>
+              <p class="tl">fetch16: reads two bytes to form a 16-bit word...</p>
+              <p class="tl">...read the low byte first (x86 is little-endian)...</p>
+              <p class="tl">...then the high byte...</p>
+              <p class="tl">...combine them: high byte shifted left 8 bits + low byte = 16-bit value.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: The decode switch -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">DECODE: the CPU's giant menu</h2>
+        <p>After fetching the first byte (the <span class="tooltip" data-tip="An opcode (operation code) is the first byte of a machine instruction. It tells the CPU what operation to perform — like 0xB8 for MOV AX, 0xF4 for HLT, or 0x74 for JE.">opcode</span>), the decoder looks it up in a massive switch statement — one case per possible first byte:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — executeBinaryStep (simplified)</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">let</span> opcode = <span class="code-function">fetch8</span>();</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-keyword">switch</span> (opcode) {</span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0xF4</span>:</span>
+<span class="code-line">    <span class="code-comment">// HLT — stop execution</span></span>
+<span class="code-line">    <span class="code-keyword">return false</span>;</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0x90</span>:</span>
+<span class="code-line">    <span class="code-comment">// NOP — do nothing</span></span>
+<span class="code-line">    <span class="code-keyword">break</span>;</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0xB8</span>: <span class="code-comment">// MOV AX, imm16</span></span>
+<span class="code-line">    <span class="code-property">e</span>.reg.AX = <span class="code-function">fetch16</span>();</span>
+<span class="code-line">    <span class="code-keyword">break</span>;</span>
+<span class="code-line">  <span class="code-comment">// ... 200+ more cases ...</span></span>
+<span class="code-line">}</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Fetch the first byte — this is the opcode, the instruction ID number.</p>
+              <p class="tl">A big decision tree: what does this byte mean?</p>
+              <p class="tl">0xF4 is the halt instruction...</p>
+              <p class="tl">...return false to signal "stop running."</p>
+              <p class="tl">0x90 is NOP — No OPeration. Literally do nothing (used for timing padding).</p>
+              <p class="tl">Break to the next iteration of the run loop.</p>
+              <p class="tl">0xB8 is "MOV AX, immediate 16-bit value"...</p>
+              <p class="tl">...fetch the next 2 bytes from memory (the number to load) and put them in AX.</p>
+              <p class="tl">There are 200+ opcodes total. The switch handles all of them.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🔑</div>
+          <div class="callout-content">
+            <strong class="callout-title">The opcode IS the instruction</strong>
+            <p>Machine code is not magic — it is just numbers. 0xF4 always means HLT. 0xB8 always means MOV AX. The CPU's switch statement is its entire vocabulary. That switch statement is what people mean when they say "hardware instruction set."</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: The run loop with requestAnimationFrame -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The run loop: 20 instructions every animation frame</h2>
+        <p>When you click "Run," the emulator uses <span class="tooltip" data-tip="requestAnimationFrame is a browser API that runs a callback 60 times per second, synchronized with the screen refresh rate. It's the standard way to animate things in browsers without wasting CPU.">requestAnimationFrame</span> to run the CPU in bursts — executing about 20 instructions per frame, then handing control back to the browser to update the UI:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">App.jsx — runLoop</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> runLoop = <span class="code-function">useCallback</span>(() => {</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!runningRef.current) <span class="code-keyword">return</span>;</span>
+<span class="code-line">  <span class="code-keyword">for</span> (<span class="code-keyword">let</span> i = <span class="code-number">0</span>; i < <span class="code-number">20</span>; i++) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> ok =</span>
+<span class="code-line">      <span class="code-function">executeStep</span>(eng.current, ctx);</span>
+<span class="code-line">    <span class="code-keyword">if</span> (!ok) {</span>
+<span class="code-line">      runningRef.current = <span class="code-keyword">false</span>;</span>
+<span class="code-line">      <span class="code-keyword">break</span>;</span>
+<span class="code-line">    }</span>
+<span class="code-line">  }</span>
+<span class="code-line">  <span class="code-function">forceRender</span>();</span>
+<span class="code-line">  <span class="code-function">requestAnimationFrame</span>(runLoop);</span>
+<span class="code-line">}, []);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The main run loop function — it schedules itself to run every animation frame (~60fps).</p>
+              <p class="tl">If the user clicked Stop, quit immediately.</p>
+              <p class="tl">Execute up to 20 CPU instructions in a tight burst...</p>
+              <p class="tl">...call executeStep() once per instruction. It returns true to continue or false to halt.</p>
+              <p class="tl">If the CPU halted (HLT instruction or error)...</p>
+              <p class="tl">...mark running=false and stop the loop.</p>
+              <p class="tl">After the burst: force the React UI to re-render (show updated registers, VGA screen, etc.)</p>
+              <p class="tl">Schedule the next burst 1/60th of a second later via requestAnimationFrame — keeps the UI responsive.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: The data flow animation -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Watch one instruction travel through the system</h2>
+        <p>Follow a single <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">MOV AX, 0xB800</code> instruction from bytes in memory all the way to a changed register:</p>
+
+        <div class="flow-animation animate-in" style="margin-top: var(--space-6)" data-steps='[
+          {"highlight":"flow-actor-1","label":"Memory holds the bytes: B8 00 B8 at address CS:IP"},
+          {"highlight":"flow-actor-2","label":"fetch8() reads 0xB8 from memory. IP advances to next byte.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"Decoder: opcode 0xB8 = MOV AX, imm16. Fetch 2 more bytes..."},
+          {"highlight":"flow-actor-1","label":"fetch16() reads 0x00 then 0xB8 from memory. Combined = 0xB800.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-3","label":"Execute: e.reg.AX = 0xB800. Register AX is now updated.","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-4","label":"forceRender() called. React updates the Registers Panel in the UI.","packet":true,"from":"actor-3","to":"actor-4"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">💾</div>
+              <span>Memory</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">🔍</div>
+              <span>Decoder</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">📊</div>
+              <span>AX Register</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">🖥️</div>
+              <span>React UI</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+          <div class="flow-step-label" id="flow-label">Click "Next Step" to trace the instruction</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Step mode -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The Step button — a superpower for understanding</h2>
+        <p>When you click <strong>Step</strong> in the emulator, it executes exactly one instruction and logs the bytes that were decoded. This is how low-level debugging works:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">App.jsx — stepUI</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> stepUI = <span class="code-function">useCallback</span>(() => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> e = eng.current;</span>
+<span class="code-line">  <span class="code-keyword">const</span> prevIP = e.reg.IP;</span>
+<span class="code-line">  <span class="code-function">executeStep</span>(e, ctx);</span>
+<span class="code-line">  <span class="code-keyword">const</span> bytesUsed =</span>
+<span class="code-line">    e.reg.IP - prevIP;</span>
+<span class="code-line">  <span class="code-function">addLog</span>(</span>
+<span class="code-line">    <span class="code-string">`CS:IP=</span><span class="code-operator">${</span><span class="code-function">toHex</span>(prevIP)<span class="code-operator">}</span></span>
+<span class="code-line">    <span class="code-string"> | bytes=</span><span class="code-operator">${</span>bytesUsed<span class="code-operator">}</span><span class="code-string">`</span></span>
+<span class="code-line">  );</span>
+<span class="code-line">  <span class="code-function">forceRender</span>();</span>
+<span class="code-line">}, []);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The Step function — runs one instruction and logs it.</p>
+              <p class="tl">Get the current CPU state.</p>
+              <p class="tl">Save the current IP address — this is where the instruction started.</p>
+              <p class="tl">Execute exactly one instruction.</p>
+              <p class="tl">Calculate how many bytes the instruction consumed (IP moved forward by this many).</p>
+              <p class="tl">A 1-byte instruction like HLT consumed 1. A MOV AX, imm16 consumed 3.</p>
+              <p class="tl">Log: "CS:IP=0100 | bytes=3" — tells you exactly where you were and how long the instruction was.</p>
+              <p class="tl">Force the UI to refresh so all panels show the updated state.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🛠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Step mode = the best learning tool</strong>
+            <p>Try this: load the default Hello 8086 code, click Assemble, then Step repeatedly. Watch AX change, then ES, then SI, DI, CX. You're watching the CPU's inner monologue, one thought at a time.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Test your instincts</h2>
+
+        <div class="quiz-container" id="quiz-module4">
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Exactly! IP (Instruction Pointer) advances automatically after each byte fetch. When fetch16() runs, IP moves forward by 2. So IP always points to the next unread instruction byte — it is the read head of the CPU."
+               data-explanation-wrong="Not quite. AX only changes during the EXECUTE phase when the instruction writes to it. It is IP that changes during FETCH — it auto-advances to point to the next byte each time fetch8() is called.">
+            <h3 class="quiz-question">During the FETCH phase of MOV AX, 0xB800, which register changes automatically — before the instruction even executes?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>AX — it is being loaded with the new value</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>CS — the code segment advances to track position</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>IP — it advances automatically after each byte read, tracking the next instruction</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Right! The run loop calls executeStep() in a batch of 20 per frame, then calls requestAnimationFrame to schedule the next batch. This keeps the browser UI responsive — if you ran an infinite tight loop, the page would freeze."
+               data-explanation-wrong="requestAnimationFrame does the scheduling — it tells the browser to call runLoop again when the next screen frame is ready (~60 times per second). It is not the CPU register itself.">
+            <h3 class="quiz-question">Why does the runLoop use requestAnimationFrame instead of a simple while(true) loop?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because the 8086 CPU ran at exactly 60Hz, matching the browser frame rate</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To keep the browser UI responsive — a while(true) loop would freeze the page and block React renders</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because requestAnimationFrame is faster than a while loop for arithmetic</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

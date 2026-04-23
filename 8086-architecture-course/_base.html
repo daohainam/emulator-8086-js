@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intel 8086: Computer Architecture Explained</title>
+
+  <!-- Google Fonts: Bricolage Grotesque · DM Sans · JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- amber accent — warm, vintage, evokes 1970s amber phosphor monitors -->
+  <style>
+    :root {
+      --color-accent:       #D4A843;
+      --color-accent-hover: #BF9530;
+      --color-accent-light: #FDF5E0;
+      --color-accent-muted: #E0C070;
+    }
+  </style>
+
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+  <nav class="nav" id="nav">
+    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="nav-inner">
+      <span class="nav-title">Intel 8086: Computer Architecture Explained</span>
+      <div class="nav-dots" id="nav-dots" role="tablist">
+        <button class="nav-dot" data-target="module-1" data-tooltip="The Machine That Started It All" role="tab" aria-label="Module 1: The Machine That Started It All"></button>
+        <button class="nav-dot" data-target="module-2" data-tooltip="Registers, Flags &amp; Memory" role="tab" aria-label="Module 2: Registers, Flags &amp; Memory"></button>
+        <button class="nav-dot" data-target="module-3" data-tooltip="Speaking Machine Language" role="tab" aria-label="Module 3: Speaking Machine Language"></button>
+        <button class="nav-dot" data-target="module-4" data-tooltip="The Heartbeat: Fetch-Decode-Execute" role="tab" aria-label="Module 4: The Heartbeat"></button>
+        <button class="nav-dot" data-target="module-5" data-tooltip="The Outside World: I/O &amp; Devices" role="tab" aria-label="Module 5: The Outside World"></button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- modules/*.html content is assembled here by build.sh -->

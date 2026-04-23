@@ -1,0 +1,348 @@
+<section class="module" id="module-2" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">02</span>
+      <h1 class="module-title">Registers, Flags &amp; Memory</h1>
+      <p class="module-subtitle">The CPU's inner world — its scratchpad, mood ring, and vast storage vault</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: Registers as scratchpad -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The CPU's scratchpad: 14 registers</h2>
+        <p>Think of <span class="tooltip" data-tip="A register is an ultra-fast storage slot built directly into the CPU chip. There are only a handful of them, but they are thousands of times faster than RAM because they are physically part of the processor.">registers</span> like the sticky notes on a chef's workstation — a tiny handful of labeled spots where the cook keeps the numbers they're actively working with right now. The 8086 has 14 of them:</p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); margin-top: var(--space-6)">
+          <!-- General Purpose -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-1)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-1); text-transform: uppercase; letter-spacing: 0.05em">General Purpose (Arithmetic)</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>AX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Accumulator</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>BX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Base</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>CX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Counter</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Data</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">Each is 16 bits wide. AX can be split into AH (high byte) and AL (low byte).</p>
+          </div>
+
+          <!-- Index & Pointer -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-2)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-2); text-transform: uppercase; letter-spacing: 0.05em">Index &amp; Pointer</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SI</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Source Index</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DI</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Dest Index</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SP</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Stack Pointer</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>BP</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Base Pointer</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">Used for pointing to locations in memory. SP tracks the top of the stack. IP (not shown) holds the next instruction address.</p>
+          </div>
+
+          <!-- Segment Registers -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-4)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-4); text-transform: uppercase; letter-spacing: 0.05em">Segment Registers</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>CS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Code Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Data Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Stack Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>ES</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Extra Segment</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">These point to 64 KB "windows" into the 1 MB address space. CS:IP together point to the next instruction.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: How registers look in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">What registers look like in the emulator code</h2>
+        <p>All CPU state lives in a single JavaScript object. Registers are just properties of that object — nothing magical:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> getReg16 = (<span class="code-property">idx</span>) =></span>
+<span class="code-line">  <span class="code-property">e</span>.reg[</span>
+<span class="code-line">    [<span class="code-string">"AX"</span>,<span class="code-string">"CX"</span>,<span class="code-string">"DX"</span>,<span class="code-string">"BX"</span>,</span>
+<span class="code-line">     <span class="code-string">"SP"</span>,<span class="code-string">"BP"</span>,<span class="code-string">"SI"</span>,<span class="code-string">"DI"</span>][<span class="code-property">idx</span>]</span>
+<span class="code-line">  ];</span>
+<span class="code-line"><span class="code-keyword">const</span> setReg16 = (<span class="code-property">idx</span>, <span class="code-property">val</span>) =></span>
+<span class="code-line">  <span class="code-property">e</span>.reg[[<span class="code-string">"AX"</span>,<span class="code-string">"CX"</span>,<span class="code-string">"DX"</span>,<span class="code-string">"BX"</span>,</span>
+<span class="code-line">         <span class="code-string">"SP"</span>,<span class="code-string">"BP"</span>,<span class="code-string">"SI"</span>,<span class="code-string">"DI"</span>][<span class="code-property">idx</span>]]</span>
+<span class="code-line">    = <span class="code-property">val</span> & <span class="code-number">0xFFFF</span>;</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Define a function that reads a 16-bit register by its numeric index...</p>
+              <p class="tl">Look up the register name in an ordered list (AX=0, CX=1, DX=2...) ...</p>
+              <p class="tl">...the 8086 hardware defines this exact order — it matches the CPU encoding.</p>
+              <p class="tl">Define a function that writes a value to a 16-bit register...</p>
+              <p class="tl">...same name lookup using the index number...</p>
+              <p class="tl">...but mask to 16 bits (0xFFFF) so it never stores more than 65535. This is how real hardware works.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: Flags -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Flags — the CPU's mood indicators</h2>
+        <p>After every calculation, the CPU automatically updates a set of <span class="tooltip" data-tip="Flags are single-bit values (0 or 1) that record the outcome of the last arithmetic operation. They let the CPU make decisions — like 'jump if the result was zero.'">flags</span>. Think of them like dashboard warning lights on a car — they tell you what just happened:</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-6)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">ZF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Zero Flag</h4>
+            <p class="pattern-desc">Set to 1 when the result of an operation is zero. Powers instructions like <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JZ</code> (jump if zero).</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">CF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Carry Flag</h4>
+            <p class="pattern-desc">Set when an addition overflows or a subtraction underflows. Essential for multi-byte arithmetic and detecting errors.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">SF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Sign Flag</h4>
+            <p class="pattern-desc">Mirrors the top bit of the result. If SF=1, the result is negative (in signed arithmetic). Powers <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JL</code> / <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JG</code> comparisons.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">DF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Direction Flag</h4>
+            <p class="pattern-desc">Controls whether string operations move forward (DF=0) or backward (DF=1) in memory. Set with <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">STD</code> / cleared with <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">CLD</code>.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">IF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Interrupt Flag</h4>
+            <p class="pattern-desc">When IF=1, hardware interrupts (keyboard, timer) are allowed. When IF=0, the CPU ignores them — like "do not disturb" mode.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: Segmented memory model -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The 1 MB memory vault — accessed via zip codes</h2>
+        <p>The 8086 has a <span class="tooltip" data-tip="Address space is the total range of memory locations a CPU can refer to. The 8086 has a 20-bit address bus, giving it 2²⁰ = 1,048,576 unique addresses — one megabyte.">1 MB address space</span>. But the registers are only 16-bit, which can only address 64 KB. How do you reach all 1 MB? With a clever trick called <strong>segmented addressing</strong>.</p>
+
+        <p style="margin-top: var(--space-4)">Think of memory like a city with ZIP codes. The <strong>segment register</strong> is the ZIP code (neighborhood). The <strong>offset register</strong> is the street address. Together they pinpoint any house in the city:</p>
+
+        <div class="translation-block animate-in" style="margin-top: var(--space-6)">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-comment">// Total address space (1 MB)</span></span>
+<span class="code-line"><span class="code-keyword">const</span> <span class="code-property">ADDR_SPACE</span> = <span class="code-number">1048576</span>;</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// Convert segment:offset to physical address</span></span>
+<span class="code-line"><span class="code-keyword">const</span> calcPhys = (<span class="code-property">s</span>, <span class="code-property">o</span>) =></span>
+<span class="code-line">  (((<span class="code-property">s</span> & <span class="code-number">0xFFFF</span>) << <span class="code-number">4</span>)</span>
+<span class="code-line">  + (<span class="code-property">o</span> & <span class="code-number">0xFFFF</span>))</span>
+<span class="code-line">  & (<span class="code-property">ADDR_SPACE</span> - <span class="code-number">1</span>);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The entire memory is 1,048,576 bytes (1 MB) — defined as a constant.</p>
+              <p class="tl">A function that converts a segment + offset pair to a single physical address...</p>
+              <p class="tl">Take the segment value and shift it left by 4 bits (multiply by 16). This gives a 20-bit base address.</p>
+              <p class="tl">Add the offset value to it...</p>
+              <p class="tl">...and wrap around if it exceeds 1 MB (the & mask keeps it in range). Result: any byte in the 1 MB vault is reachable.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🗺️</div>
+          <div class="callout-content">
+            <strong class="callout-title">The formula: physical = (segment × 16) + offset</strong>
+            <p>Example: CS=0x0000, IP=0x0100 → physical address = (0 × 16) + 256 = 256. That's where your program's first instruction lives when you use ORG 100h. You can verify this in the Memory Viewer!</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: Memory map -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The 1 MB memory map — neighborhoods with reserved addresses</h2>
+        <p>Not all of memory is equally free. Certain address ranges are reserved for hardware — like land zoned for government buildings:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-md); margin-top: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm)">
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-1); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x00000–0x003FF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Interrupt Vector Table</strong> — 256 pointers to interrupt handlers (4 bytes each)</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-2); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x00400–0x004FF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-surface-warm); color: var(--color-text-secondary)"><strong>BIOS Data Area (BDA)</strong> — keyboard buffer, cursor position, hardware status</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-4); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x07C00</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Boot Sector Load Point</strong> — BIOS copies disk sector 0 here, then jumps to it</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-5); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0xB8000–0xBBFFF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-surface-warm); color: var(--color-text-secondary)"><strong>VGA Text VRAM</strong> — the 80×25 screen. Write here → characters appear on the monitor</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr">
+            <div style="background: var(--color-actor-3); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0xFFFFF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Reset Vector</strong> — the very first address the CPU executes after power-on</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: The flags register in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">How the emulator packs 8 flags into one 16-bit number</h2>
+        <p>All flags are stored in a single 16-bit <span class="tooltip" data-tip="In hardware, the flags register is a single 16-bit value where each bit position represents one flag. Packing multiple yes/no values into a single number like this is called bit manipulation.">flags register</span>. The emulator uses two functions — <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">packFlags</code> and <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">unpackFlags</code> — to convert between the object form and the raw hardware integer:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> packFlags = (<span class="code-property">e</span>) => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> f = <span class="code-property">e</span>.flags; <span class="code-keyword">let</span> r = <span class="code-number">0</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.CF) r |= (<span class="code-number">1</span><<<span class="code-number">0</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.ZF) r |= (<span class="code-number">1</span><<<span class="code-number">6</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.SF) r |= (<span class="code-number">1</span><<<span class="code-number">7</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.IF) r |= (<span class="code-number">1</span><<<span class="code-number">9</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.DF) r |= (<span class="code-number">1</span><<<span class="code-number">10</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.OF) r |= (<span class="code-number">1</span><<<span class="code-number">11</span>);</span>
+<span class="code-line">  <span class="code-keyword">return</span> r;</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A function to pack all flags into one 16-bit hardware number...</p>
+              <p class="tl">Start with result = 0 (all bits off)...</p>
+              <p class="tl">If Carry Flag is set, turn on bit 0 of the result (hardware position for CF).</p>
+              <p class="tl">If Zero Flag is set, turn on bit 6 (the 8086 hardware specification says ZF lives at bit 6).</p>
+              <p class="tl">Sign Flag → bit 7. Interrupt Flag → bit 9. These positions are fixed by Intel's specification.</p>
+              <p class="tl">Direction Flag → bit 10. Overflow Flag → bit 11.</p>
+              <p class="tl">Return the single packed number — this is the exact format real 8086 hardware uses in the PUSHF instruction.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 7: Chat animation — registers talking -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">How a simple instruction changes everything</h2>
+        <p>Let's trace what happens when the CPU executes <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">CMP AX, 0</code> — the instruction asks "is AX equal to zero?"</p>
+
+        <div class="chat-window" id="chat-registers" style="margin-top: var(--space-6)">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="instruction" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">IP</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Instruction Pointer (CS:IP)</span>
+                <p>Fetching next instruction from memory at 0x0100... it says CMP AX, 0</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="decoder" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">DE</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Binary Decoder</span>
+                <p>I decoded byte 0x3D from memory. That means CMP AX, immediate. Fetching the 16-bit value to compare against...</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="ax" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-4)">AX</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-4)">AX Register</span>
+                <p>My current value is 0x0000 (zero). The comparison is: 0 - 0 = 0.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="flags" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-5)">FL</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-5)">Flags Register</span>
+                <p>Result is zero! I'm setting ZF=1, SF=0, CF=0, OF=0. Now any JZ instruction will jump!</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="instruction" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">IP</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Instruction Pointer</span>
+                <p>IP advances past CMP to the next instruction. Ready for whatever comes next — JZ, JNZ, or just the next statement.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-typing-registers" style="display:none">
+            <div class="chat-avatar" id="chat-registers-typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Test your instincts</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Exactly! Physical address = (0xB800 × 16) + 0x0000 = 0xB8000. This is the VGA text VRAM base — writing here puts characters on screen."
+               data-explanation-wrong="Remember the formula: physical = (segment × 16) + offset. Segment 0xB800 shifted left by 4 gives 0xB8000, then add offset 0x0000.">
+            <h3 class="quiz-question">Your assembly code sets ES = 0xB800 and writes to [ES:0]. What physical address in the 1 MB memory space is being written to?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0x0B800 — the segment value directly</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0xB8000 — segment × 16 + offset</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0xB8000F — segment × 16 + offset with padding</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Right! After SUB AX, AX the result is 0. ZF=1 signals that. A following JZ (jump if zero) would take the branch. This is how loops and conditionals work in assembly."
+               data-explanation-wrong="Think about what SUB AX, AX does — it subtracts AX from itself. The result is always 0, so the Zero Flag (ZF) fires.">
+            <h3 class="quiz-question">The CPU executes SUB AX, AX (subtract AX from itself). The next instruction is JZ LABEL. What happens?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The jump is not taken — ZF stays 0 because AX was not negative</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The carry flag (CF) fires, causing an error</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>ZF=1 because the result is 0, so JZ takes the jump to LABEL</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

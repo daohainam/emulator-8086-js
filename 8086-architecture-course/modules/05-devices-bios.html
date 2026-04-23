@@ -1,0 +1,362 @@
+<section class="module" id="module-5" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">05</span>
+      <h1 class="module-title">The Outside World</h1>
+      <p class="module-subtitle">BIOS interrupts, VGA memory, keyboard, disk, and the boot sequence</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What are peripherals? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The CPU is not an island</h2>
+        <p>A CPU alone can't do much. It needs to talk to the <strong>outside world</strong> — the screen, keyboard, disk, speaker. It does this via two channels: <span class="tooltip" data-tip="Memory-mapped I/O means a hardware device (like the VGA screen) is assigned a fixed range of memory addresses. Writing to those addresses controls the device — no special instructions needed.">memory-mapped I/O</span> and <span class="tooltip" data-tip="Port I/O uses special IN and OUT instructions to talk to hardware devices. Each device is assigned a port number (like a radio frequency). Port 0x60 = keyboard, port 0x61 = PC speaker.">port I/O</span>. Think of it like a hotel: room-to-room calls go through the building wiring (memory-mapped), but calls outside go through the front desk (port I/O).</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-8)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🖥️</div>
+            <h4 class="pattern-title">VGA Screen</h4>
+            <p class="pattern-desc">Write character bytes to <strong>0xB8000</strong> in memory and they appear on screen. No special instruction needed — it's just a memory write.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">⌨️</div>
+            <h4 class="pattern-title">Keyboard</h4>
+            <p class="pattern-desc">Port <strong>0x60</strong> streams scan codes. The emulator also supports BIOS INT 16h for higher-level keyboard reading.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔊</div>
+            <h4 class="pattern-title">PC Speaker</h4>
+            <p class="pattern-desc">Port <strong>0x61</strong> controls the speaker gate. Writing the frequency divisor to port <strong>0x42</strong> sets the pitch. Implemented via Web Audio API.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">💿</div>
+            <h4 class="pattern-title">Disk</h4>
+            <p class="pattern-desc">Port <strong>0x70</strong> selects a sector. Port <strong>0x71</strong> transfers it to/from memory at DS:BX. Or use BIOS INT 13h for sector reads/writes.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: BIOS interrupts -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">BIOS interrupts — the original operating system API</h2>
+        <p>Before modern <span class="tooltip" data-tip="An operating system (OS) is software that manages hardware resources and provides services to programs. DOS, Windows, Linux are all operating systems. In the 8086 era, BIOS (Basic Input/Output System) was the first layer of OS services.">operating systems</span>, programs called the <span class="tooltip" data-tip="BIOS stands for Basic Input/Output System. It's firmware stored in ROM that provides hardware abstraction services. Programs call BIOS via software interrupts (INT instructions) to read the keyboard, draw to the screen, and access the disk.">BIOS</span> directly for hardware services. The mechanism is the <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #CBA6F7; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">INT</code> instruction — a software interrupt. Like pressing a service button in an elevator:</p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); margin-top: var(--space-6)">
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-1)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-1); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 10h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Video Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=00</span> → Set video mode / clear screen</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=02</span> → Set cursor position (DH=row, DL=col)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=09</span> → Write character+attr at cursor (AL=char, BL=attr)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=0E</span> → Write char in TTY mode (auto-scroll)</div>
+            </div>
+          </div>
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-2)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-2); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 16h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Keyboard Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=00</span> → Wait for a keypress, return in AX</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=01</span> → Check if key available (ZF=0 if yes)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=02</span> → Get shift/ctrl/alt key status byte</div>
+            </div>
+          </div>
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-4)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-4); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 13h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Disk Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=02</span> → Read sectors to ES:BX buffer</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=03</span> → Write sectors from ES:BX buffer</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=08</span> → Get drive geometry (cylinders, heads, sectors)</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: INT 10h in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Inside the BIOS video handler</h2>
+        <p>When your assembly code calls <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">INT 10h</code>, control jumps to <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">handleInt10</code> in <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">CPU8086.js</code>:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — handleInt10 (partial)</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> handleInt10 = (<span class="code-property">e</span>) => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> ah =</span>
+<span class="code-line">    (<span class="code-property">e</span>.reg.AX >> <span class="code-number">8</span>) & <span class="code-number">0xFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">const</span> al =</span>
+<span class="code-line">    <span class="code-property">e</span>.reg.AX & <span class="code-number">0xFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (ah === <span class="code-number">0x0E</span>) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> idx = <span class="code-property">VGA_BASE</span></span>
+<span class="code-line">      + (<span class="code-property">e</span>.cursorY * <span class="code-number">80</span></span>
+<span class="code-line">      + <span class="code-property">e</span>.cursorX) * <span class="code-number">2</span>;</span>
+<span class="code-line">    <span class="code-property">e</span>.mem[idx]     = al;</span>
+<span class="code-line">    <span class="code-property">e</span>.mem[idx + <span class="code-number">1</span>] = <span class="code-number">0x07</span>;</span>
+<span class="code-line">    <span class="code-property">e</span>.cursorX++;</span>
+<span class="code-line">  }</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The BIOS video interrupt handler — called whenever assembly code runs INT 10h.</p>
+              <p class="tl">Read the high byte of AX (the "function selector")...</p>
+              <p class="tl">...AH tells us which video service was requested.</p>
+              <p class="tl">Read the low byte of AX (the character to print).</p>
+              <p class="tl">AH=0x0E means "TTY write" — print a character at the cursor position.</p>
+              <p class="tl">Calculate the VGA memory address: base 0xB8000 + (row × 80 + column) × 2 bytes per cell.</p>
+              <p class="tl">Write the character byte to that address. Now it shows on screen!</p>
+              <p class="tl">Write 0x07 (white on black) as the color attribute for this cell.</p>
+              <p class="tl">Move the cursor one column to the right — ready for the next character.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: VGA memory visualization -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The VGA screen IS a piece of memory</h2>
+        <p>The 80×25 text screen is literally 4,000 bytes (80 columns × 25 rows × 2 bytes per cell) starting at address <strong>0xB8000</strong>. The React <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">VGAMonitor</code> component reads this memory and renders it 60 times per second:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-6); box-shadow: var(--shadow-md); margin-top: var(--space-6)">
+          <!-- VGA grid visualization -->
+          <div style="text-align: center; margin-bottom: var(--space-4)">
+            <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em">Memory at 0xB8000 → Screen cells</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; font-family: var(--font-mono); font-size: 10px; margin-bottom: var(--space-4)">
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F38BA8; font-weight: 700">H</div>
+              <div style="color: #6C7086; font-size: 8px">48 0C</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F9E2AF; font-weight: 700">e</div>
+              <div style="color: #6C7086; font-size: 8px">65 0E</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #A6E3A1; font-weight: 700">l</div>
+              <div style="color: #6C7086; font-size: 8px">6C 0A</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #94E2D5; font-weight: 700">l</div>
+              <div style="color: #6C7086; font-size: 8px">6C 0B</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #89B4FA; font-weight: 700">o</div>
+              <div style="color: #6C7086; font-size: 8px">6F 09</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; opacity: 0.4; border: 1px solid rgba(255,255,255,0.05)">
+              <div style="color: #CDD6F4">·</div>
+              <div style="color: #6C7086; font-size: 8px">20 07</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #CBA6F7; font-weight: 700">8</div>
+              <div style="color: #6C7086; font-size: 8px">38 0D</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F38BA8; font-weight: 700">0</div>
+              <div style="color: #6C7086; font-size: 8px">30 0C</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F9E2AF; font-weight: 700">8</div>
+              <div style="color: #6C7086; font-size: 8px">38 0E</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #A6E3A1; font-weight: 700">6</div>
+              <div style="color: #6C7086; font-size: 8px">36 0A</div>
+            </div>
+          </div>
+          <p style="font-size: var(--text-xs); color: var(--color-text-secondary); text-align: center">Each cell shows: character (top) · hex bytes in memory (bottom). Low byte = ASCII · High byte = color (0x0C = light red, 0x0E = yellow, etc.)</p>
+        </div>
+      </section>
+
+      <!-- Screen 5: The boot sequence -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The boot sequence — from power-on to running code</h2>
+        <p>When you click the <strong>Boot</strong> button in the emulator, it replays the exact sequence a real PC does at startup. Understanding this is knowing the blueprint of every operating system ever written:</p>
+
+        <div class="chat-window" id="chat-boot" style="margin-top: var(--space-6)">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="cpu" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">CPU</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">CPU (after power-on)</span>
+                <p>I just turned on. My IP is set to 0xFFF0 — the reset vector. I start executing whatever code is there.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="bios" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">BIOS</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">BIOS (at reset vector)</span>
+                <p>I load disk sector 0 (the first 512 bytes of the virtual disk) into memory at address 0x7C00...</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="bios" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">BIOS</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">BIOS</span>
+                <p>I check the last two bytes of sector 0: are they 0x55 and 0xAA? That is the boot signature — it means "this disk is bootable." If not, I refuse to boot.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="cpu" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">CPU</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">CPU</span>
+                <p>Boot signature found! BIOS sets CS=0x0000 and IP=0x7C00. I jump to 0x7C00 and start executing the boot sector code. This could be a bootloader, or a tiny OS, or a Hello World.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="disk" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-4)">DISK</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-4)">Virtual Disk</span>
+                <p>I am a 128 KB array. Sectors 0-255 each hold 512 bytes. You can write bootable code to me using the Disk Viewer, then click Boot to run it!</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-boot-typing" style="display:none">
+            <div class="chat-avatar" id="chat-boot-typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Putting it all together -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The complete picture</h2>
+        <p>You now know the entire stack. From transistors to text on screen — here it is in one view:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); margin-top: var(--space-6)">
+          <div style="background: var(--color-actor-1); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🧑‍💻 You (Assembly Code)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Write human-readable instructions in NASM syntax</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ Assembler8086.js translates to bytes</div>
+          <div style="background: var(--color-actor-2); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">💾 1 MB Memory Array</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Program bytes load at ORG address. VGA at 0xB8000. Stack at SS:SP.</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ CPU8086.js fetches, decodes, executes</div>
+          <div style="background: var(--color-actor-4); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🧠 CPU (Registers + Flags)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">AX, BX, CS:IP, SP — state changes with every instruction executed</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ Devices read/write memory and ports</div>
+          <div style="background: var(--color-actor-5); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🌍 Devices (VGA · Keyboard · Disk · Speaker)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Hardware peripherals respond to memory writes and port I/O</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ App.jsx forceRender() updates the UI</div>
+          <div style="background: var(--color-actor-3); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🖥️ React UI (VGA Monitor + Panels)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Characters appear on screen. Registers update. System log shows execution trail.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-8)">
+          <div class="callout-icon">🏆</div>
+          <div class="callout-content">
+            <strong class="callout-title">You now speak computer architecture</strong>
+            <p>Registers. Segmented memory. Fetch-Decode-Execute. Memory-mapped I/O. BIOS interrupts. These are not just buzzwords — they are the actual vocabulary of how every computer that has ever existed works under the hood.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Final challenge</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="Exactly! Writing directly to 0xB8000 in memory (via ES=0xB800, then [ES:DI]) bypasses the BIOS entirely and is the fastest way to put text on screen. BIOS INT 10h does the same thing but adds overhead. Direct VGA writes are what demo coders and early game developers used."
+               data-explanation-wrong="INT 10h works, but it goes through the BIOS handler which has overhead. Direct VGA memory writes at 0xB8000 are faster and give you full color control per character cell.">
+            <h3 class="quiz-question">You want to display colored text as fast as possible — one character at a time with precise color control. What is the most direct approach?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Write char+color bytes directly to memory at 0xB8000 (ES=0xB800, then [ES:DI])</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 10h with AH=0x0E for every character</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Use OUT instructions to port 0x3D4 to control character display</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Right! The boot signature is 0x55 0xAA at bytes 510-511 of sector 0. Without it, BIOS refuses to execute the sector. This prevents accidentally booting from corrupt or non-bootable media."
+               data-explanation-wrong="The boot signature is not an instruction — it is a magic number at the end of sector 0 that BIOS checks. 0x55AA tells BIOS: this sector is intentionally bootable.">
+            <h3 class="quiz-question">You write a boot sector program but clicking Boot does nothing — the emulator does not execute your code. What is the most likely cause?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The first instruction must be a JMP — BIOS requires it as the entry point marker</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The boot signature (bytes 0x55, 0xAA at offset 510-511) is missing from sector 0</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>You used INT 10h before the video mode was initialized</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Correct! INT 16h AH=00 blocks (waits) until a key is pressed, then returns the key in AX. This is perfect for interactive programs — the loop reads a key, processes it, and repeats. It is the 8086 equivalent of reading a line from stdin."
+               data-explanation-wrong="INT 10h is video services, not keyboard. Port 0x60 is the raw hardware level but needs more complex handling (scan codes, shift states). INT 16h is the clean BIOS API for keyboard input.">
+            <h3 class="quiz-question">You are writing an interactive 8086 program. You want to read keypresses from the user in a loop. What is the correct approach?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 10h with AH=00 to read keyboard input into AX</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Continuously read from memory address 0x0417 to check for key presses</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 16h with AH=00 — it waits for a keypress and returns the ASCII code in AL</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

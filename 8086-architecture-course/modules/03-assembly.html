@@ -1,0 +1,296 @@
+<section class="module" id="module-3" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">03</span>
+      <h1 class="module-title">Speaking Machine Language</h1>
+      <p class="module-subtitle">How human-readable assembly becomes the raw bytes a CPU can eat</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What is assembly? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Assembly is a thin wrapper around machine code</h2>
+        <p><span class="tooltip" data-tip="Assembly language is the lowest-level human-readable programming language. Each instruction maps almost directly to one CPU operation — unlike Python or JavaScript which are much more abstract.">Assembly language</span> is the thinnest possible abstraction over raw binary. Instead of writing bytes like <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #FAB387; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">0xB8 0x00 0x00</code>, you write <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">mov ax, 0</code> and let the <span class="tooltip" data-tip="An assembler is a program that translates assembly language text into binary machine code. It's one step above writing raw hex bytes by hand.">assembler</span> do the translation.</p>
+
+        <p style="margin-top: var(--space-4)">Think of it like Morse code — a human-readable shorthand that maps precisely to a binary signal:</p>
+
+        <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--space-4); align-items: center; margin-top: var(--space-6)">
+          <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm); color: #CDD6F4">
+            <div style="color: #6C7086; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--space-3)">Assembly Text</div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-property">ax</span>, <span class="code-number">0xB800</span></div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-property">es</span>, <span class="code-property">ax</span></div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-keyword">byte</span> [<span class="code-property">es:di</span>], <span class="code-number">65</span></div>
+          </div>
+          <div style="text-align: center; font-size: 2rem; color: var(--color-accent)">→</div>
+          <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm); color: #CDD6F4">
+            <div style="color: #6C7086; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--space-3)">Machine Code Bytes</div>
+            <div style="line-height: 2; color: #FAB387">B8 00 B8</div>
+            <div style="line-height: 2; color: #FAB387">8E C0</div>
+            <div style="line-height: 2; color: #FAB387">26 88 05</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: The two-pass assembler -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The assembler works in two passes — like a book editor</h2>
+        <p>The <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">Assembler8086</code> class uses a classic <strong>two-pass</strong> technique. Imagine editing a book where chapter 3 references "see Chapter 7" — you can't know the page number until you've laid out the whole book first:</p>
+
+        <div class="flow-steps animate-in" style="margin-top: var(--space-6)">
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-1)">1</div>
+            <p><strong>Pass 1 — Scout:</strong> Scan all lines, calculate instruction sizes, build a <span class="tooltip" data-tip="A symbol table is a lookup dictionary mapping label names (like 'print_loop') to their memory addresses. The assembler builds this during Pass 1 so Pass 2 can resolve references.">symbol table</span> of every label and its address</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-2)">2</div>
+            <p><strong>Pass 2 — Encode:</strong> Go through every instruction again, now generating actual bytes using the symbol table to resolve labels</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-5)">✓</div>
+            <p><strong>Output:</strong> A <code style="font-family: var(--font-mono); font-size: var(--text-sm); background: var(--color-bg-code); color: #89B4FA; padding: 1px 4px; border-radius: 3px">Uint8Array</code> of machine code bytes, ready to load into the CPU's memory</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-8)">
+          <div class="callout-icon">📚</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why two passes?</strong>
+            <p>In one-pass assemblers, you can only jump to labels you've already seen. Two-pass lets you write <code style="font-family: var(--font-mono); font-size: var(--text-sm)">JMP END_LABEL</code> before END_LABEL is defined. Every serious assembler (NASM, GAS, MASM) uses this pattern.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: Opcode table -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Every instruction is a rule: operand types → bytes</h2>
+        <p>The assembler stores a giant <span class="tooltip" data-tip="An opcode table is a data structure mapping instruction names (like MOV, ADD, JMP) to the specific binary encodings for each combination of operand types. It's the assembler's recipe book.">opcode table</span> — a recipe book where each instruction mnemonic maps to rules for encoding it:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">Assembler8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> <span class="code-property">OPCODE_TABLE</span> = {</span>
+<span class="code-line">  <span class="code-string">'HLT'</span>: [{</span>
+<span class="code-line">    match: [],</span>
+<span class="code-line">    size: () => <span class="code-number">1</span>,</span>
+<span class="code-line">    encode: () => [<span class="code-number">0xF4</span>]</span>
+<span class="code-line">  }],</span>
+<span class="code-line">  <span class="code-string">'INT'</span>: [{</span>
+<span class="code-line">    match: [<span class="code-property">OpType</span>.NUMBER],</span>
+<span class="code-line">    size: (ops) =></span>
+<span class="code-line">      (ops[<span class="code-number">0</span>].value === <span class="code-number">3</span>) ? <span class="code-number">1</span> : <span class="code-number">2</span>,</span>
+<span class="code-line">    encode: (ops) => {</span>
+<span class="code-line">      <span class="code-keyword">if</span> (ops[<span class="code-number">0</span>].value === <span class="code-number">3</span>)</span>
+<span class="code-line">        <span class="code-keyword">return</span> [<span class="code-number">0xCC</span>];</span>
+<span class="code-line">      <span class="code-keyword">return</span> [<span class="code-number">0xCD</span>, ops[<span class="code-number">0</span>].value & <span class="code-number">0xFF</span>];</span>
+<span class="code-line">    }</span>
+<span class="code-line">  }]</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A big lookup object: instruction names → encoding rules.</p>
+              <p class="tl">HLT (halt): takes no operands...</p>
+              <p class="tl">...always produces exactly 1 byte...</p>
+              <p class="tl">...and that byte is 0xF4 — the 8086 opcode for halt.</p>
+              <p class="tl">INT (software interrupt): takes one number as operand...</p>
+              <p class="tl">...INT 3 is special: it is 1 byte (0xCC). All other INTs are 2 bytes...</p>
+              <p class="tl">...INT 3 encodes as [0xCC] (breakpoint shorthand). All others: [0xCD, interrupt-number].</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: ModRM encoding -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The ModRM byte — 8086's clever compression trick</h2>
+        <p>Most 8086 instructions use a single extra byte called <span class="tooltip" data-tip="The ModRM byte is a compact encoding scheme where one byte specifies the addressing mode (Mod), which register to use (Reg), and whether the second operand is a register or memory reference (RM). It packs three pieces of information into 8 bits.">ModRM</span> to specify their operands. It's like an area code — a short numeric code that tells the CPU exactly where to find each piece of data:</p>
+
+        <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); margin-top: var(--space-6); font-family: var(--font-mono)">
+          <div style="display: grid; grid-template-columns: 2fr 3fr 3fr; gap: var(--space-2); margin-bottom: var(--space-4)">
+            <div style="background: var(--color-actor-1); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>Mod (2 bits)</strong></div>
+            <div style="background: var(--color-actor-2); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>Reg (3 bits)</strong></div>
+            <div style="background: var(--color-actor-4); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>RM (3 bits)</strong></div>
+          </div>
+          <div style="display: grid; grid-template-columns: 2fr 3fr 3fr; gap: var(--space-2); font-size: var(--text-xs); color: #CDD6F4">
+            <div style="padding: var(--space-2); background: rgba(217,79,48,0.15); border-radius: var(--radius-sm)">
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">00 = [mem]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">01 = [mem+disp8]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">10 = [mem+disp16]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700">11 = register</p>
+            </div>
+            <div style="padding: var(--space-2); background: rgba(42,123,155,0.15); border-radius: var(--radius-sm)">
+              <p style="margin-bottom: 4px; color: #9E9790">Destination register or opcode extension</p>
+              <p style="color: var(--color-actor-2)">000=AX, 001=CX, 010=DX, 011=BX, 100=SP, 101=BP, 110=SI, 111=DI</p>
+            </div>
+            <div style="padding: var(--space-2); background: rgba(212,168,67,0.15); border-radius: var(--radius-sm)">
+              <p style="margin-bottom: 4px; color: #9E9790">Source register or memory base</p>
+              <p style="color: var(--color-actor-4)">Same codes as Reg field — but when Mod=11, it picks a register. Otherwise picks a memory addressing mode.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in" style="margin-top: var(--space-6)">
+          <div class="translation-code">
+            <span class="translation-label">Assembler8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> encodeModRM = (<span class="code-property">mod</span>, <span class="code-property">reg</span>, <span class="code-property">rm</span>) =></span>
+<span class="code-line">  ((<span class="code-property">mod</span> & <span class="code-number">0b11</span>)   << <span class="code-number">6</span>)</span>
+<span class="code-line">  | ((<span class="code-property">reg</span> & <span class="code-number">0b111</span>) << <span class="code-number">3</span>)</span>
+<span class="code-line">  | (<span class="code-property">rm</span>  & <span class="code-number">0b111</span>);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Pack three values into one byte using bit shifting.</p>
+              <p class="tl">Put the Mod field (2 bits) into the top two bits of the byte (positions 7-6).</p>
+              <p class="tl">Put the Reg field (3 bits) into the middle (positions 5-3).</p>
+              <p class="tl">Put the RM field (3 bits) into the bottom (positions 2-0). One byte = three fields = all operand info.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: The default Hello 8086 program -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Anatomy of the default "Hello 8086" program</h2>
+        <p>The emulator ships with a demo program that writes colored text directly to VGA memory. Let's read it line by line:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">DEFAULT_CODE (App.jsx)</span>
+            <pre><code>
+<span class="code-line"><span class="code-property">ORG</span> <span class="code-number">100h</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">ax</span>, <span class="code-number">0xB800</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">es</span>, <span class="code-property">ax</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">si</span>, <span class="code-property">hello8086</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">di</span>, <span class="code-number">1990</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">cx</span>, <span class="code-number">10</span></span>
+<span class="code-line"><span class="code-property">print_loop:</span></span>
+<span class="code-line">  <span class="code-keyword">lodsw</span></span>
+<span class="code-line">  <span class="code-keyword">mov</span> [<span class="code-property">es:di</span>], <span class="code-property">ax</span></span>
+<span class="code-line">  <span class="code-keyword">add</span> <span class="code-property">di</span>, <span class="code-number">2</span></span>
+<span class="code-line">  <span class="code-keyword">loop</span> <span class="code-property">print_loop</span></span>
+<span class="code-line">  <span class="code-keyword">hlt</span></span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Load this program at address 0x100 in memory (256 bytes in).</p>
+              <p class="tl">Load the number 0xB800 into register AX — the VGA segment number.</p>
+              <p class="tl">Copy AX into ES so ES points to the VGA text screen.</p>
+              <p class="tl">SI points to our "hello8086" data below — the colored character data.</p>
+              <p class="tl">DI=1990: that position on the 80×25 grid is roughly center screen.</p>
+              <p class="tl">CX=10: we will loop exactly 10 times (one per character).</p>
+              <p class="tl">A label marks the top of the loop.</p>
+              <p class="tl">LODSW: load a 16-bit word from [SI] into AX, then advance SI by 2.</p>
+              <p class="tl">Write AX directly into VGA memory at ES:DI — this puts one char+color on screen.</p>
+              <p class="tl">Move DI forward 2 bytes to the next screen cell.</p>
+              <p class="tl">LOOP decrements CX; if CX != 0, jump back to print_loop. Stop when CX hits 0.</p>
+              <p class="tl">HLT — halt the CPU. Program is done.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Data encoding (DW) -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Character data: encoding ASCII + color in two bytes</h2>
+        <p>Each VGA text cell is exactly <strong>2 bytes</strong>. Low byte = <span class="tooltip" data-tip="ASCII is a standard that assigns numbers to characters. 'A' is 65, 'B' is 66, and so on up to 127. The 8086 used ASCII for all text.">ASCII</span> character code. High byte = color attribute (top 4 bits = background color, bottom 4 bits = foreground color):</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-6); box-shadow: var(--shadow-md); margin-top: var(--space-6)">
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); font-family: var(--font-mono); font-size: var(--text-sm); text-align: center">
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #F38BA8; font-weight: 700; font-size: var(--text-lg)">H</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0C48</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x48='H' · 0x0C=Light Red</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #F9E2AF; font-weight: 700; font-size: var(--text-lg)">e</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0E65</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x65='e' · 0x0E=Yellow</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #A6E3A1; font-weight: 700; font-size: var(--text-lg)">l</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0A6C</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6C='l' · 0x0A=Lt Green</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #89DCEB; font-weight: 700; font-size: var(--text-lg)">l</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0B6C</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6C='l' · 0x0B=Lt Cyan</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #89B4FA; font-weight: 700; font-size: var(--text-lg)">o</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x096F</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6F='o' · 0x09=Lt Blue</div>
+            </div>
+          </div>
+          <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-4); text-align: center">Each <code style="font-family: var(--font-mono)">DW</code> (define word) stores a 16-bit value. Low byte = ASCII code. High byte = DOS color attribute.</p>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Apply what you learned</h2>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Correct! Pass 1 scans for label addresses (the symbol table). Pass 2 uses those addresses to encode jump targets. Without Pass 1, the assembler would not know where LOOP_START lives when it encounters the JMP."
+               data-explanation-wrong="The assembler never modifies memory directly — it just produces bytes. The issue is about knowing label addresses before encoding jumps that reference them.">
+            <h3 class="quiz-question">Your assembly has a JMP LOOP_START at the bottom, but LOOP_START is defined at the top. Why does the assembler need two passes to handle this?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It needs to write to memory twice — once for data, once for code</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Pass 1 builds the symbol table (label addresses). Pass 2 encodes the jump using that address.</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The CPU needs to validate the code before executing it, so the assembler checks twice</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="Exactly — DI=1990 means byte offset 1990 from 0xB8000. With each cell being 2 bytes, that is row 12 column 35 — close to the center of the 80×25 screen. The programmer calculated this deliberately."
+               data-explanation-wrong="Remember: VGA memory is at 0xB8000. ES=0xB800 points to it. DI is the offset within that segment. Each character cell is 2 bytes (char + color), so DI=1990 is position 1990/2 = character #995.">
+            <h3 class="quiz-question">In the Hello 8086 program, DI is set to 1990 before the loop. What is the actual effect of writing to [ES:DI] with ES=0xB800?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Characters appear near the center of the 80×25 VGA screen — that position maps to roughly row 12, column 35</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Characters are written to disk sector 1990 for storage</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The CPU jumps to address 1990 and begins executing from there</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

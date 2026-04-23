@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intel 8086: Computer Architecture Explained</title>
+
+  <!-- Google Fonts: Bricolage Grotesque · DM Sans · JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- amber accent — warm, vintage, evokes 1970s amber phosphor monitors -->
+  <style>
+    :root {
+      --color-accent:       #D4A843;
+      --color-accent-hover: #BF9530;
+      --color-accent-light: #FDF5E0;
+      --color-accent-muted: #E0C070;
+    }
+  </style>
+
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+  <nav class="nav" id="nav">
+    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="nav-inner">
+      <span class="nav-title">Intel 8086: Computer Architecture Explained</span>
+      <div class="nav-dots" id="nav-dots" role="tablist">
+        <button class="nav-dot" data-target="module-1" data-tooltip="The Machine That Started It All" role="tab" aria-label="Module 1: The Machine That Started It All"></button>
+        <button class="nav-dot" data-target="module-2" data-tooltip="Registers, Flags &amp; Memory" role="tab" aria-label="Module 2: Registers, Flags &amp; Memory"></button>
+        <button class="nav-dot" data-target="module-3" data-tooltip="Speaking Machine Language" role="tab" aria-label="Module 3: Speaking Machine Language"></button>
+        <button class="nav-dot" data-target="module-4" data-tooltip="The Heartbeat: Fetch-Decode-Execute" role="tab" aria-label="Module 4: The Heartbeat"></button>
+        <button class="nav-dot" data-target="module-5" data-tooltip="The Outside World: I/O &amp; Devices" role="tab" aria-label="Module 5: The Outside World"></button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- modules/*.html content is assembled here by build.sh -->
+<section class="module" id="module-1" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">01</span>
+      <h1 class="module-title">The Machine That Started It All</h1>
+      <p class="module-subtitle">Meet the Intel 8086 — the chip that runs inside this browser tab right now</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What is this thing? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">You're running a 1978 computer in your browser</h2>
+        <p>In 1978, Intel released a <span class="tooltip" data-tip="A microprocessor is a tiny chip — smaller than a thumbnail — that executes billions of instructions per second. It's the brain of every computer, phone, and smart device.">microprocessor</span> called the <strong>Intel 8086</strong>. It powered the very first IBM PCs. Every modern x86 chip — your laptop, your server, your gaming PC — is a direct descendant of it. This emulator lets you run 8086 code right here, right now, in JavaScript.</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-8)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📅</div>
+            <h4 class="pattern-title">Born in 1978</h4>
+            <p class="pattern-desc">Intel 8086 introduced the x86 architecture — still alive in every Windows PC today, 45+ years later.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">💾</div>
+            <h4 class="pattern-title">1 Megabyte of RAM</h4>
+            <p class="pattern-desc">The 8086 could address exactly 1,048,576 bytes (1 MB). Modern chips address billions of times more.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🌐</div>
+            <h4 class="pattern-title">100% in JavaScript</h4>
+            <p class="pattern-desc">This emulator faithfully re-creates the 8086 hardware in JS — every register, every flag, every memory byte.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: What does the emulator look like? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">A computer inside a web page</h2>
+        <p>When you open this emulator, you're looking at a virtual computer with real hardware components — all simulated in JavaScript. Here's everything on screen at once:</p>
+
+        <div class="arch-diagram animate-in" style="margin-top: var(--space-8)">
+          <div class="arch-zone" style="border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-6); background: var(--color-surface-warm)">
+            <h4 class="arch-zone-label" style="font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-text-muted); margin-bottom: var(--space-4)">8086 Emulator — All Components</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3)">
+              <div class="arch-component" data-desc="Where you type NASM assembly instructions. The ORG field sets where code loads in memory." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">✏️</div>
+                <strong style="font-size: var(--text-sm)">Code Editor</strong>
+              </div>
+              <div class="arch-component" data-desc="Translates your assembly text into binary machine code bytes that the CPU can execute." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">⚙️</div>
+                <strong style="font-size: var(--text-sm)">Assembler</strong>
+              </div>
+              <div class="arch-component" data-desc="The CPU core: decodes and executes one x86 opcode at a time using the hardware binary decoder engine." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">🧠</div>
+                <strong style="font-size: var(--text-sm)">CPU8086</strong>
+              </div>
+              <div class="arch-component" data-desc="An 80×25 text grid reading from memory address 0xB8000. Each character cell is 2 bytes: ASCII code + color attribute." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">🖥️</div>
+                <strong style="font-size: var(--text-sm)">VGA Monitor</strong>
+              </div>
+              <div class="arch-component" data-desc="Live view of AX, BX, CX, DX and all 14 CPU registers. Flags like ZF (zero flag) and CF (carry flag) update in real time." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">📊</div>
+                <strong style="font-size: var(--text-sm)">Registers Panel</strong>
+              </div>
+              <div class="arch-component" data-desc="A hex view of the virtual disk (128 KB). Used for booting — the BIOS loads sector 0 into address 0x7C00 and jumps there." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">💿</div>
+                <strong style="font-size: var(--text-sm)">Disk Viewer</strong>
+              </div>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc" style="margin-top: var(--space-4); padding: var(--space-4); background: var(--color-accent-light); border-left: 3px solid var(--color-accent); border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-secondary); min-height: 3rem">
+            👆 Click any component to learn what it does
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: The journey — tracing a program -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">From text to pixels — what happens when you click "Assemble"?</h2>
+        <p>Imagine you type <code style="background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: var(--text-sm)">mov ax, 0xB800</code> and hit Assemble. Here's the journey:</p>
+
+        <div class="flow-steps animate-in" style="margin-top: var(--space-8)">
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-1)">1</div>
+            <p><strong>You write</strong> NASM assembly text in the Code Editor</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-2)">2</div>
+            <p><strong>Assembler8086</strong> converts your text to raw bytes (machine code)</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-3)">3</div>
+            <p><strong>Bytes load</strong> into the 1 MB memory array at the ORG address</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-4)">4</div>
+            <p><strong>CPU8086</strong> fetches, decodes, and executes each instruction one by one</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-5)">5</div>
+            <p><strong>VGA monitor</strong> reads memory at 0xB8000 and renders colored characters on screen</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-8)">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why does this matter for you?</strong>
+            <p>Every modern computer — your laptop, your phone — still follows this same pipeline: text → compiler/assembler → machine code → CPU → output. The 8086 is the simplest possible example of this universal pattern. Understand the 8086, understand computing.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: The three source files -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Three files power this entire emulator</h2>
+        <p>The whole system is built from just three <span class="tooltip" data-tip="A source file is a text file containing code. When compiled or interpreted, it becomes software that runs on a computer.">source files</span>:</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-6)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">CPU8086.js</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The CPU Brain</h4>
+            <p class="pattern-desc">~2,500 lines. Implements the hardware: registers, flags, 1 MB memory, and a binary decoder that executes every 8086 instruction.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">Assembler8086.js</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The Translator</h4>
+            <p class="pattern-desc">~500 lines. A two-pass NASM-compatible assembler that converts human-readable assembly instructions to binary machine code bytes.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">App.jsx</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The Control Room</h4>
+            <p class="pattern-desc">~2,000 lines. The React UI — code editor, VGA monitor, register display, memory viewer, disk viewer, and the run/step loop.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-8)">
+          <div class="callout-icon">🔑</div>
+          <div class="callout-content">
+            <strong class="callout-title">The Vocabulary Win</strong>
+            <p>After this course, you'll know exactly what to tell an AI agent: "in the CPU8086 execution engine," "in the assembler opcode table," "in the VGA renderer" — instead of "in the code somewhere." Precision speeds up everything.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Check your understanding</h2>
+
+        <div class="quiz-container" id="quiz-module1">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Exactly! The Assembler8086 converts assembly text to bytes, then those bytes are loaded into memory for the CPU to execute."
+               data-explanation-wrong="Not quite — the VGA monitor only reads memory (at 0xB8000) to render pixels. It does not convert code. That is the assembler's job.">
+            <h3 class="quiz-question">You type assembly code and click Assemble. Which component is responsible for turning your text into binary bytes the CPU can execute?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The VGA Monitor — it reads memory and displays characters</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The Assembler8086 — it translates text instructions to machine code bytes</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The Registers Panel — it tracks what the CPU is doing</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Correct! CPU8086.js is the hardware brain. App.jsx is the control room (UI). Assembler8086.js is the translator. Three very different roles."
+               data-explanation-wrong="Close, but App.jsx is more like the control room — it handles the UI, buttons, and run loop. CPU8086.js is the actual hardware emulation.">
+            <h3 class="quiz-question">A colleague says the emulator has a bug — instructions are executing in the wrong order. Which file would you look at first?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>App.jsx — this is where all the important logic lives</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Assembler8086.js — the assembler might be generating wrong bytes</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>CPU8086.js — the execution engine is where instruction order is controlled</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module1')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module1')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
+
+<section class="module" id="module-2" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">02</span>
+      <h1 class="module-title">Registers, Flags &amp; Memory</h1>
+      <p class="module-subtitle">The CPU's inner world — its scratchpad, mood ring, and vast storage vault</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: Registers as scratchpad -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The CPU's scratchpad: 14 registers</h2>
+        <p>Think of <span class="tooltip" data-tip="A register is an ultra-fast storage slot built directly into the CPU chip. There are only a handful of them, but they are thousands of times faster than RAM because they are physically part of the processor.">registers</span> like the sticky notes on a chef's workstation — a tiny handful of labeled spots where the cook keeps the numbers they're actively working with right now. The 8086 has 14 of them:</p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); margin-top: var(--space-6)">
+          <!-- General Purpose -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-1)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-1); text-transform: uppercase; letter-spacing: 0.05em">General Purpose (Arithmetic)</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>AX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Accumulator</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>BX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Base</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>CX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Counter</span></div>
+              <div style="background: var(--color-bg-code); color: #FAB387; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DX</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Data</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">Each is 16 bits wide. AX can be split into AH (high byte) and AL (low byte).</p>
+          </div>
+
+          <!-- Index & Pointer -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-2)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-2); text-transform: uppercase; letter-spacing: 0.05em">Index &amp; Pointer</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SI</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Source Index</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DI</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Dest Index</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SP</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Stack Pointer</span></div>
+              <div style="background: var(--color-bg-code); color: #89B4FA; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>BP</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Base Pointer</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">Used for pointing to locations in memory. SP tracks the top of the stack. IP (not shown) holds the next instruction address.</p>
+          </div>
+
+          <!-- Segment Registers -->
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-top: 3px solid var(--color-actor-4)">
+            <h4 style="font-family: var(--font-display); font-size: var(--text-sm); margin-bottom: var(--space-3); color: var(--color-actor-4); text-transform: uppercase; letter-spacing: 0.05em">Segment Registers</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm)">
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>CS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Code Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>DS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Data Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>SS</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Stack Segment</span></div>
+              <div style="background: var(--color-bg-code); color: #F9E2AF; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm)"><strong>ES</strong> <span style="color: #6C7086; font-size: var(--text-xs)">Extra Segment</span></div>
+            </div>
+            <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-3)">These point to 64 KB "windows" into the 1 MB address space. CS:IP together point to the next instruction.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: How registers look in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">What registers look like in the emulator code</h2>
+        <p>All CPU state lives in a single JavaScript object. Registers are just properties of that object — nothing magical:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> getReg16 = (<span class="code-property">idx</span>) =></span>
+<span class="code-line">  <span class="code-property">e</span>.reg[</span>
+<span class="code-line">    [<span class="code-string">"AX"</span>,<span class="code-string">"CX"</span>,<span class="code-string">"DX"</span>,<span class="code-string">"BX"</span>,</span>
+<span class="code-line">     <span class="code-string">"SP"</span>,<span class="code-string">"BP"</span>,<span class="code-string">"SI"</span>,<span class="code-string">"DI"</span>][<span class="code-property">idx</span>]</span>
+<span class="code-line">  ];</span>
+<span class="code-line"><span class="code-keyword">const</span> setReg16 = (<span class="code-property">idx</span>, <span class="code-property">val</span>) =></span>
+<span class="code-line">  <span class="code-property">e</span>.reg[[<span class="code-string">"AX"</span>,<span class="code-string">"CX"</span>,<span class="code-string">"DX"</span>,<span class="code-string">"BX"</span>,</span>
+<span class="code-line">         <span class="code-string">"SP"</span>,<span class="code-string">"BP"</span>,<span class="code-string">"SI"</span>,<span class="code-string">"DI"</span>][<span class="code-property">idx</span>]]</span>
+<span class="code-line">    = <span class="code-property">val</span> & <span class="code-number">0xFFFF</span>;</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Define a function that reads a 16-bit register by its numeric index...</p>
+              <p class="tl">Look up the register name in an ordered list (AX=0, CX=1, DX=2...) ...</p>
+              <p class="tl">...the 8086 hardware defines this exact order — it matches the CPU encoding.</p>
+              <p class="tl">Define a function that writes a value to a 16-bit register...</p>
+              <p class="tl">...same name lookup using the index number...</p>
+              <p class="tl">...but mask to 16 bits (0xFFFF) so it never stores more than 65535. This is how real hardware works.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: Flags -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Flags — the CPU's mood indicators</h2>
+        <p>After every calculation, the CPU automatically updates a set of <span class="tooltip" data-tip="Flags are single-bit values (0 or 1) that record the outcome of the last arithmetic operation. They let the CPU make decisions — like 'jump if the result was zero.'">flags</span>. Think of them like dashboard warning lights on a car — they tell you what just happened:</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-6)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">ZF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Zero Flag</h4>
+            <p class="pattern-desc">Set to 1 when the result of an operation is zero. Powers instructions like <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JZ</code> (jump if zero).</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">CF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Carry Flag</h4>
+            <p class="pattern-desc">Set when an addition overflows or a subtraction underflows. Essential for multi-byte arithmetic and detecting errors.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">SF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Sign Flag</h4>
+            <p class="pattern-desc">Mirrors the top bit of the result. If SF=1, the result is negative (in signed arithmetic). Powers <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JL</code> / <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">JG</code> comparisons.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">DF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Direction Flag</h4>
+            <p class="pattern-desc">Controls whether string operations move forward (DF=0) or backward (DF=1) in memory. Set with <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">STD</code> / cleared with <code style="font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-bg-code); color: #CBA6F7; padding: 1px 4px; border-radius: 3px">CLD</code>.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5); font-family: var(--font-mono); font-size: var(--text-sm); color: white; padding: 4px 8px; border-radius: var(--radius-sm)">IF</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-2)">Interrupt Flag</h4>
+            <p class="pattern-desc">When IF=1, hardware interrupts (keyboard, timer) are allowed. When IF=0, the CPU ignores them — like "do not disturb" mode.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: Segmented memory model -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The 1 MB memory vault — accessed via zip codes</h2>
+        <p>The 8086 has a <span class="tooltip" data-tip="Address space is the total range of memory locations a CPU can refer to. The 8086 has a 20-bit address bus, giving it 2²⁰ = 1,048,576 unique addresses — one megabyte.">1 MB address space</span>. But the registers are only 16-bit, which can only address 64 KB. How do you reach all 1 MB? With a clever trick called <strong>segmented addressing</strong>.</p>
+
+        <p style="margin-top: var(--space-4)">Think of memory like a city with ZIP codes. The <strong>segment register</strong> is the ZIP code (neighborhood). The <strong>offset register</strong> is the street address. Together they pinpoint any house in the city:</p>
+
+        <div class="translation-block animate-in" style="margin-top: var(--space-6)">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-comment">// Total address space (1 MB)</span></span>
+<span class="code-line"><span class="code-keyword">const</span> <span class="code-property">ADDR_SPACE</span> = <span class="code-number">1048576</span>;</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// Convert segment:offset to physical address</span></span>
+<span class="code-line"><span class="code-keyword">const</span> calcPhys = (<span class="code-property">s</span>, <span class="code-property">o</span>) =></span>
+<span class="code-line">  (((<span class="code-property">s</span> & <span class="code-number">0xFFFF</span>) << <span class="code-number">4</span>)</span>
+<span class="code-line">  + (<span class="code-property">o</span> & <span class="code-number">0xFFFF</span>))</span>
+<span class="code-line">  & (<span class="code-property">ADDR_SPACE</span> - <span class="code-number">1</span>);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The entire memory is 1,048,576 bytes (1 MB) — defined as a constant.</p>
+              <p class="tl">A function that converts a segment + offset pair to a single physical address...</p>
+              <p class="tl">Take the segment value and shift it left by 4 bits (multiply by 16). This gives a 20-bit base address.</p>
+              <p class="tl">Add the offset value to it...</p>
+              <p class="tl">...and wrap around if it exceeds 1 MB (the & mask keeps it in range). Result: any byte in the 1 MB vault is reachable.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🗺️</div>
+          <div class="callout-content">
+            <strong class="callout-title">The formula: physical = (segment × 16) + offset</strong>
+            <p>Example: CS=0x0000, IP=0x0100 → physical address = (0 × 16) + 256 = 256. That's where your program's first instruction lives when you use ORG 100h. You can verify this in the Memory Viewer!</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: Memory map -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The 1 MB memory map — neighborhoods with reserved addresses</h2>
+        <p>Not all of memory is equally free. Certain address ranges are reserved for hardware — like land zoned for government buildings:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-md); margin-top: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm)">
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-1); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x00000–0x003FF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Interrupt Vector Table</strong> — 256 pointers to interrupt handlers (4 bytes each)</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-2); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x00400–0x004FF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-surface-warm); color: var(--color-text-secondary)"><strong>BIOS Data Area (BDA)</strong> — keyboard buffer, cursor position, hardware status</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-4); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0x07C00</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Boot Sector Load Point</strong> — BIOS copies disk sector 0 here, then jumps to it</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr; border-bottom: 1px solid var(--color-border)">
+            <div style="background: var(--color-actor-5); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0xB8000–0xBBFFF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-surface-warm); color: var(--color-text-secondary)"><strong>VGA Text VRAM</strong> — the 80×25 screen. Write here → characters appear on the monitor</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 140px 1fr">
+            <div style="background: var(--color-actor-3); color: white; padding: var(--space-3) var(--space-4); font-weight: 700">0xFFFFF</div>
+            <div style="padding: var(--space-3) var(--space-4); background: var(--color-bg); color: var(--color-text-secondary)"><strong>Reset Vector</strong> — the very first address the CPU executes after power-on</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: The flags register in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">How the emulator packs 8 flags into one 16-bit number</h2>
+        <p>All flags are stored in a single 16-bit <span class="tooltip" data-tip="In hardware, the flags register is a single 16-bit value where each bit position represents one flag. Packing multiple yes/no values into a single number like this is called bit manipulation.">flags register</span>. The emulator uses two functions — <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">packFlags</code> and <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">unpackFlags</code> — to convert between the object form and the raw hardware integer:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> packFlags = (<span class="code-property">e</span>) => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> f = <span class="code-property">e</span>.flags; <span class="code-keyword">let</span> r = <span class="code-number">0</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.CF) r |= (<span class="code-number">1</span><<<span class="code-number">0</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.ZF) r |= (<span class="code-number">1</span><<<span class="code-number">6</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.SF) r |= (<span class="code-number">1</span><<<span class="code-number">7</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.IF) r |= (<span class="code-number">1</span><<<span class="code-number">9</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.DF) r |= (<span class="code-number">1</span><<<span class="code-number">10</span>);</span>
+<span class="code-line">  <span class="code-keyword">if</span> (f.OF) r |= (<span class="code-number">1</span><<<span class="code-number">11</span>);</span>
+<span class="code-line">  <span class="code-keyword">return</span> r;</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A function to pack all flags into one 16-bit hardware number...</p>
+              <p class="tl">Start with result = 0 (all bits off)...</p>
+              <p class="tl">If Carry Flag is set, turn on bit 0 of the result (hardware position for CF).</p>
+              <p class="tl">If Zero Flag is set, turn on bit 6 (the 8086 hardware specification says ZF lives at bit 6).</p>
+              <p class="tl">Sign Flag → bit 7. Interrupt Flag → bit 9. These positions are fixed by Intel's specification.</p>
+              <p class="tl">Direction Flag → bit 10. Overflow Flag → bit 11.</p>
+              <p class="tl">Return the single packed number — this is the exact format real 8086 hardware uses in the PUSHF instruction.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 7: Chat animation — registers talking -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">How a simple instruction changes everything</h2>
+        <p>Let's trace what happens when the CPU executes <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">CMP AX, 0</code> — the instruction asks "is AX equal to zero?"</p>
+
+        <div class="chat-window" id="chat-registers" style="margin-top: var(--space-6)">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="instruction" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">IP</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Instruction Pointer (CS:IP)</span>
+                <p>Fetching next instruction from memory at 0x0100... it says CMP AX, 0</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="decoder" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">DE</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">Binary Decoder</span>
+                <p>I decoded byte 0x3D from memory. That means CMP AX, immediate. Fetching the 16-bit value to compare against...</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="ax" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-4)">AX</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-4)">AX Register</span>
+                <p>My current value is 0x0000 (zero). The comparison is: 0 - 0 = 0.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="flags" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-5)">FL</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-5)">Flags Register</span>
+                <p>Result is zero! I'm setting ZF=1, SF=0, CF=0, OF=0. Now any JZ instruction will jump!</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="instruction" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">IP</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">Instruction Pointer</span>
+                <p>IP advances past CMP to the next instruction. Ready for whatever comes next — JZ, JNZ, or just the next statement.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-typing-registers" style="display:none">
+            <div class="chat-avatar" id="chat-registers-typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Test your instincts</h2>
+
+        <div class="quiz-container" id="quiz-module2">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Exactly! Physical address = (0xB800 × 16) + 0x0000 = 0xB8000. This is the VGA text VRAM base — writing here puts characters on screen."
+               data-explanation-wrong="Remember the formula: physical = (segment × 16) + offset. Segment 0xB800 shifted left by 4 gives 0xB8000, then add offset 0x0000.">
+            <h3 class="quiz-question">Your assembly code sets ES = 0xB800 and writes to [ES:0]. What physical address in the 1 MB memory space is being written to?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0x0B800 — the segment value directly</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0xB8000 — segment × 16 + offset</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>0xB8000F — segment × 16 + offset with padding</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Right! After SUB AX, AX the result is 0. ZF=1 signals that. A following JZ (jump if zero) would take the branch. This is how loops and conditionals work in assembly."
+               data-explanation-wrong="Think about what SUB AX, AX does — it subtracts AX from itself. The result is always 0, so the Zero Flag (ZF) fires.">
+            <h3 class="quiz-question">The CPU executes SUB AX, AX (subtract AX from itself). The next instruction is JZ LABEL. What happens?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The jump is not taken — ZF stays 0 because AX was not negative</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The carry flag (CF) fires, causing an error</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>ZF=1 because the result is 0, so JZ takes the jump to LABEL</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
+
+<section class="module" id="module-3" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">03</span>
+      <h1 class="module-title">Speaking Machine Language</h1>
+      <p class="module-subtitle">How human-readable assembly becomes the raw bytes a CPU can eat</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What is assembly? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Assembly is a thin wrapper around machine code</h2>
+        <p><span class="tooltip" data-tip="Assembly language is the lowest-level human-readable programming language. Each instruction maps almost directly to one CPU operation — unlike Python or JavaScript which are much more abstract.">Assembly language</span> is the thinnest possible abstraction over raw binary. Instead of writing bytes like <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #FAB387; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">0xB8 0x00 0x00</code>, you write <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">mov ax, 0</code> and let the <span class="tooltip" data-tip="An assembler is a program that translates assembly language text into binary machine code. It's one step above writing raw hex bytes by hand.">assembler</span> do the translation.</p>
+
+        <p style="margin-top: var(--space-4)">Think of it like Morse code — a human-readable shorthand that maps precisely to a binary signal:</p>
+
+        <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--space-4); align-items: center; margin-top: var(--space-6)">
+          <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm); color: #CDD6F4">
+            <div style="color: #6C7086; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--space-3)">Assembly Text</div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-property">ax</span>, <span class="code-number">0xB800</span></div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-property">es</span>, <span class="code-property">ax</span></div>
+            <div style="line-height: 2"><span class="code-keyword">mov</span> <span class="code-keyword">byte</span> [<span class="code-property">es:di</span>], <span class="code-number">65</span></div>
+          </div>
+          <div style="text-align: center; font-size: 2rem; color: var(--color-accent)">→</div>
+          <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm); color: #CDD6F4">
+            <div style="color: #6C7086; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--space-3)">Machine Code Bytes</div>
+            <div style="line-height: 2; color: #FAB387">B8 00 B8</div>
+            <div style="line-height: 2; color: #FAB387">8E C0</div>
+            <div style="line-height: 2; color: #FAB387">26 88 05</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: The two-pass assembler -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The assembler works in two passes — like a book editor</h2>
+        <p>The <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">Assembler8086</code> class uses a classic <strong>two-pass</strong> technique. Imagine editing a book where chapter 3 references "see Chapter 7" — you can't know the page number until you've laid out the whole book first:</p>
+
+        <div class="flow-steps animate-in" style="margin-top: var(--space-6)">
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-1)">1</div>
+            <p><strong>Pass 1 — Scout:</strong> Scan all lines, calculate instruction sizes, build a <span class="tooltip" data-tip="A symbol table is a lookup dictionary mapping label names (like 'print_loop') to their memory addresses. The assembler builds this during Pass 1 so Pass 2 can resolve references.">symbol table</span> of every label and its address</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-2)">2</div>
+            <p><strong>Pass 2 — Encode:</strong> Go through every instruction again, now generating actual bytes using the symbol table to resolve labels</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-5)">✓</div>
+            <p><strong>Output:</strong> A <code style="font-family: var(--font-mono); font-size: var(--text-sm); background: var(--color-bg-code); color: #89B4FA; padding: 1px 4px; border-radius: 3px">Uint8Array</code> of machine code bytes, ready to load into the CPU's memory</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-8)">
+          <div class="callout-icon">📚</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why two passes?</strong>
+            <p>In one-pass assemblers, you can only jump to labels you've already seen. Two-pass lets you write <code style="font-family: var(--font-mono); font-size: var(--text-sm)">JMP END_LABEL</code> before END_LABEL is defined. Every serious assembler (NASM, GAS, MASM) uses this pattern.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: Opcode table -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Every instruction is a rule: operand types → bytes</h2>
+        <p>The assembler stores a giant <span class="tooltip" data-tip="An opcode table is a data structure mapping instruction names (like MOV, ADD, JMP) to the specific binary encodings for each combination of operand types. It's the assembler's recipe book.">opcode table</span> — a recipe book where each instruction mnemonic maps to rules for encoding it:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">Assembler8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> <span class="code-property">OPCODE_TABLE</span> = {</span>
+<span class="code-line">  <span class="code-string">'HLT'</span>: [{</span>
+<span class="code-line">    match: [],</span>
+<span class="code-line">    size: () => <span class="code-number">1</span>,</span>
+<span class="code-line">    encode: () => [<span class="code-number">0xF4</span>]</span>
+<span class="code-line">  }],</span>
+<span class="code-line">  <span class="code-string">'INT'</span>: [{</span>
+<span class="code-line">    match: [<span class="code-property">OpType</span>.NUMBER],</span>
+<span class="code-line">    size: (ops) =></span>
+<span class="code-line">      (ops[<span class="code-number">0</span>].value === <span class="code-number">3</span>) ? <span class="code-number">1</span> : <span class="code-number">2</span>,</span>
+<span class="code-line">    encode: (ops) => {</span>
+<span class="code-line">      <span class="code-keyword">if</span> (ops[<span class="code-number">0</span>].value === <span class="code-number">3</span>)</span>
+<span class="code-line">        <span class="code-keyword">return</span> [<span class="code-number">0xCC</span>];</span>
+<span class="code-line">      <span class="code-keyword">return</span> [<span class="code-number">0xCD</span>, ops[<span class="code-number">0</span>].value & <span class="code-number">0xFF</span>];</span>
+<span class="code-line">    }</span>
+<span class="code-line">  }]</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">A big lookup object: instruction names → encoding rules.</p>
+              <p class="tl">HLT (halt): takes no operands...</p>
+              <p class="tl">...always produces exactly 1 byte...</p>
+              <p class="tl">...and that byte is 0xF4 — the 8086 opcode for halt.</p>
+              <p class="tl">INT (software interrupt): takes one number as operand...</p>
+              <p class="tl">...INT 3 is special: it is 1 byte (0xCC). All other INTs are 2 bytes...</p>
+              <p class="tl">...INT 3 encodes as [0xCC] (breakpoint shorthand). All others: [0xCD, interrupt-number].</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: ModRM encoding -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The ModRM byte — 8086's clever compression trick</h2>
+        <p>Most 8086 instructions use a single extra byte called <span class="tooltip" data-tip="The ModRM byte is a compact encoding scheme where one byte specifies the addressing mode (Mod), which register to use (Reg), and whether the second operand is a register or memory reference (RM). It packs three pieces of information into 8 bits.">ModRM</span> to specify their operands. It's like an area code — a short numeric code that tells the CPU exactly where to find each piece of data:</p>
+
+        <div style="background: var(--color-bg-code); border-radius: var(--radius-md); padding: var(--space-6); margin-top: var(--space-6); font-family: var(--font-mono)">
+          <div style="display: grid; grid-template-columns: 2fr 3fr 3fr; gap: var(--space-2); margin-bottom: var(--space-4)">
+            <div style="background: var(--color-actor-1); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>Mod (2 bits)</strong></div>
+            <div style="background: var(--color-actor-2); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>Reg (3 bits)</strong></div>
+            <div style="background: var(--color-actor-4); color: white; padding: var(--space-2); border-radius: var(--radius-sm); text-align: center; font-size: var(--text-sm)"><strong>RM (3 bits)</strong></div>
+          </div>
+          <div style="display: grid; grid-template-columns: 2fr 3fr 3fr; gap: var(--space-2); font-size: var(--text-xs); color: #CDD6F4">
+            <div style="padding: var(--space-2); background: rgba(217,79,48,0.15); border-radius: var(--radius-sm)">
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">00 = [mem]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">01 = [mem+disp8]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700; margin-bottom: 4px">10 = [mem+disp16]</p>
+              <p style="color: var(--color-actor-1); font-weight: 700">11 = register</p>
+            </div>
+            <div style="padding: var(--space-2); background: rgba(42,123,155,0.15); border-radius: var(--radius-sm)">
+              <p style="margin-bottom: 4px; color: #9E9790">Destination register or opcode extension</p>
+              <p style="color: var(--color-actor-2)">000=AX, 001=CX, 010=DX, 011=BX, 100=SP, 101=BP, 110=SI, 111=DI</p>
+            </div>
+            <div style="padding: var(--space-2); background: rgba(212,168,67,0.15); border-radius: var(--radius-sm)">
+              <p style="margin-bottom: 4px; color: #9E9790">Source register or memory base</p>
+              <p style="color: var(--color-actor-4)">Same codes as Reg field — but when Mod=11, it picks a register. Otherwise picks a memory addressing mode.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in" style="margin-top: var(--space-6)">
+          <div class="translation-code">
+            <span class="translation-label">Assembler8086.js</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> encodeModRM = (<span class="code-property">mod</span>, <span class="code-property">reg</span>, <span class="code-property">rm</span>) =></span>
+<span class="code-line">  ((<span class="code-property">mod</span> & <span class="code-number">0b11</span>)   << <span class="code-number">6</span>)</span>
+<span class="code-line">  | ((<span class="code-property">reg</span> & <span class="code-number">0b111</span>) << <span class="code-number">3</span>)</span>
+<span class="code-line">  | (<span class="code-property">rm</span>  & <span class="code-number">0b111</span>);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Pack three values into one byte using bit shifting.</p>
+              <p class="tl">Put the Mod field (2 bits) into the top two bits of the byte (positions 7-6).</p>
+              <p class="tl">Put the Reg field (3 bits) into the middle (positions 5-3).</p>
+              <p class="tl">Put the RM field (3 bits) into the bottom (positions 2-0). One byte = three fields = all operand info.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: The default Hello 8086 program -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Anatomy of the default "Hello 8086" program</h2>
+        <p>The emulator ships with a demo program that writes colored text directly to VGA memory. Let's read it line by line:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">DEFAULT_CODE (App.jsx)</span>
+            <pre><code>
+<span class="code-line"><span class="code-property">ORG</span> <span class="code-number">100h</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">ax</span>, <span class="code-number">0xB800</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">es</span>, <span class="code-property">ax</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">si</span>, <span class="code-property">hello8086</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">di</span>, <span class="code-number">1990</span></span>
+<span class="code-line"><span class="code-keyword">mov</span> <span class="code-property">cx</span>, <span class="code-number">10</span></span>
+<span class="code-line"><span class="code-property">print_loop:</span></span>
+<span class="code-line">  <span class="code-keyword">lodsw</span></span>
+<span class="code-line">  <span class="code-keyword">mov</span> [<span class="code-property">es:di</span>], <span class="code-property">ax</span></span>
+<span class="code-line">  <span class="code-keyword">add</span> <span class="code-property">di</span>, <span class="code-number">2</span></span>
+<span class="code-line">  <span class="code-keyword">loop</span> <span class="code-property">print_loop</span></span>
+<span class="code-line">  <span class="code-keyword">hlt</span></span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Load this program at address 0x100 in memory (256 bytes in).</p>
+              <p class="tl">Load the number 0xB800 into register AX — the VGA segment number.</p>
+              <p class="tl">Copy AX into ES so ES points to the VGA text screen.</p>
+              <p class="tl">SI points to our "hello8086" data below — the colored character data.</p>
+              <p class="tl">DI=1990: that position on the 80×25 grid is roughly center screen.</p>
+              <p class="tl">CX=10: we will loop exactly 10 times (one per character).</p>
+              <p class="tl">A label marks the top of the loop.</p>
+              <p class="tl">LODSW: load a 16-bit word from [SI] into AX, then advance SI by 2.</p>
+              <p class="tl">Write AX directly into VGA memory at ES:DI — this puts one char+color on screen.</p>
+              <p class="tl">Move DI forward 2 bytes to the next screen cell.</p>
+              <p class="tl">LOOP decrements CX; if CX != 0, jump back to print_loop. Stop when CX hits 0.</p>
+              <p class="tl">HLT — halt the CPU. Program is done.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Data encoding (DW) -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Character data: encoding ASCII + color in two bytes</h2>
+        <p>Each VGA text cell is exactly <strong>2 bytes</strong>. Low byte = <span class="tooltip" data-tip="ASCII is a standard that assigns numbers to characters. 'A' is 65, 'B' is 66, and so on up to 127. The 8086 used ASCII for all text.">ASCII</span> character code. High byte = color attribute (top 4 bits = background color, bottom 4 bits = foreground color):</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-6); box-shadow: var(--shadow-md); margin-top: var(--space-6)">
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); font-family: var(--font-mono); font-size: var(--text-sm); text-align: center">
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #F38BA8; font-weight: 700; font-size: var(--text-lg)">H</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0C48</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x48='H' · 0x0C=Light Red</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #F9E2AF; font-weight: 700; font-size: var(--text-lg)">e</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0E65</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x65='e' · 0x0E=Yellow</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #A6E3A1; font-weight: 700; font-size: var(--text-lg)">l</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0A6C</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6C='l' · 0x0A=Lt Green</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #89DCEB; font-weight: 700; font-size: var(--text-lg)">l</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x0B6C</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6C='l' · 0x0B=Lt Cyan</div>
+            </div>
+            <div style="background: var(--color-bg-code); border-radius: var(--radius-sm); padding: var(--space-3)">
+              <div style="color: #89B4FA; font-weight: 700; font-size: var(--text-lg)">o</div>
+              <div style="color: #6C7086; font-size: var(--text-xs); margin-top: var(--space-1)">dw 0x096F</div>
+              <div style="color: #FAB387; font-size: var(--text-xs)">0x6F='o' · 0x09=Lt Blue</div>
+            </div>
+          </div>
+          <p style="font-size: var(--text-xs); color: var(--color-text-secondary); margin-top: var(--space-4); text-align: center">Each <code style="font-family: var(--font-mono)">DW</code> (define word) stores a 16-bit value. Low byte = ASCII code. High byte = DOS color attribute.</p>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Apply what you learned</h2>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Correct! Pass 1 scans for label addresses (the symbol table). Pass 2 uses those addresses to encode jump targets. Without Pass 1, the assembler would not know where LOOP_START lives when it encounters the JMP."
+               data-explanation-wrong="The assembler never modifies memory directly — it just produces bytes. The issue is about knowing label addresses before encoding jumps that reference them.">
+            <h3 class="quiz-question">Your assembly has a JMP LOOP_START at the bottom, but LOOP_START is defined at the top. Why does the assembler need two passes to handle this?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>It needs to write to memory twice — once for data, once for code</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Pass 1 builds the symbol table (label addresses). Pass 2 encodes the jump using that address.</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The CPU needs to validate the code before executing it, so the assembler checks twice</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="Exactly — DI=1990 means byte offset 1990 from 0xB8000. With each cell being 2 bytes, that is row 12 column 35 — close to the center of the 80×25 screen. The programmer calculated this deliberately."
+               data-explanation-wrong="Remember: VGA memory is at 0xB8000. ES=0xB800 points to it. DI is the offset within that segment. Each character cell is 2 bytes (char + color), so DI=1990 is position 1990/2 = character #995.">
+            <h3 class="quiz-question">In the Hello 8086 program, DI is set to 1990 before the loop. What is the actual effect of writing to [ES:DI] with ES=0xB800?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Characters appear near the center of the 80×25 VGA screen — that position maps to roughly row 12, column 35</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Characters are written to disk sector 1990 for storage</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The CPU jumps to address 1990 and begins executing from there</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
+
+<section class="module" id="module-4" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">04</span>
+      <h1 class="module-title">The Heartbeat</h1>
+      <p class="module-subtitle">Fetch → Decode → Execute: the three-step drum beat every CPU lives by</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: The FDE cycle concept -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Every CPU in history runs the same three-step loop</h2>
+        <p>From the 8086 to your MacBook's M-series chip, every <span class="tooltip" data-tip="CPU stands for Central Processing Unit — the main chip that executes instructions in a computer. It's the brain of the machine.">CPU</span> runs an infinite loop called the <strong>Fetch-Decode-Execute cycle</strong>. Think of it like a music box: a tiny pin plucks one note, then the cylinder rotates to the next pin, forever.</p>
+
+        <div style="display: flex; flex-direction: column; align-items: center; gap: var(--space-6); margin-top: var(--space-8)">
+          <!-- Circular FDE visualization -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-4); width: 100%">
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-1); position: relative">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">📥</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-1)">FETCH</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Read the next byte from memory at address CS:IP. Advance IP.</p>
+              <div style="position: absolute; right: -20px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--color-accent); z-index: 1">→</div>
+            </div>
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-2); position: relative">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">🔍</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-2)">DECODE</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Identify the instruction: is it MOV? ADD? JMP? Read any extra bytes (operands).</p>
+              <div style="position: absolute; right: -20px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--color-accent); z-index: 1">→</div>
+            </div>
+            <div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-md); text-align: center; border-top: 4px solid var(--color-actor-5)">
+              <div style="width: 56px; height: 56px; background: var(--color-actor-5); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto var(--space-3)">⚡</div>
+              <h3 style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-actor-5)">EXECUTE</h3>
+              <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: var(--space-2)">Perform the operation: update registers, write memory, set flags. Loop back to FETCH.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: The fetch function in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">FETCH: the first beat</h2>
+        <p>At the start of every instruction, the CPU reads the next byte from memory using <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">CS:IP</code> as the address. IP automatically advances after each read:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — executeBinaryStep</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> fetch8 = () => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> v = <span class="code-function">readMem8</span>(</span>
+<span class="code-line">    e,</span>
+<span class="code-line">    <span class="code-function">calcPhys</span>(<span class="code-property">e</span>.reg.CS, <span class="code-property">e</span>.reg.IP)</span>
+<span class="code-line">  );</span>
+<span class="code-line">  <span class="code-property">e</span>.reg.IP =</span>
+<span class="code-line">    (<span class="code-property">e</span>.reg.IP + <span class="code-number">1</span>) & <span class="code-number">0xFFFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">return</span> v;</span>
+<span class="code-line">};</span>
+<span class="code-line"><span class="code-keyword">const</span> fetch16 = () => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> lo = <span class="code-function">fetch8</span>();</span>
+<span class="code-line">  <span class="code-keyword">const</span> hi = <span class="code-function">fetch8</span>();</span>
+<span class="code-line">  <span class="code-keyword">return</span> (hi << <span class="code-number">8</span>) | lo;</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">fetch8: reads one byte from memory...</p>
+              <p class="tl">...calculate the physical address from segment CS and offset IP...</p>
+              <p class="tl">...read the byte there...</p>
+              <p class="tl">...advance IP by 1 (wrapped to 16 bits so it wraps at 65535)...</p>
+              <p class="tl">...return the byte. IP now points to the byte after the one we just read.</p>
+              <p class="tl">fetch16: reads two bytes to form a 16-bit word...</p>
+              <p class="tl">...read the low byte first (x86 is little-endian)...</p>
+              <p class="tl">...then the high byte...</p>
+              <p class="tl">...combine them: high byte shifted left 8 bits + low byte = 16-bit value.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: The decode switch -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">DECODE: the CPU's giant menu</h2>
+        <p>After fetching the first byte (the <span class="tooltip" data-tip="An opcode (operation code) is the first byte of a machine instruction. It tells the CPU what operation to perform — like 0xB8 for MOV AX, 0xF4 for HLT, or 0x74 for JE.">opcode</span>), the decoder looks it up in a massive switch statement — one case per possible first byte:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — executeBinaryStep (simplified)</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">let</span> opcode = <span class="code-function">fetch8</span>();</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-keyword">switch</span> (opcode) {</span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0xF4</span>:</span>
+<span class="code-line">    <span class="code-comment">// HLT — stop execution</span></span>
+<span class="code-line">    <span class="code-keyword">return false</span>;</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0x90</span>:</span>
+<span class="code-line">    <span class="code-comment">// NOP — do nothing</span></span>
+<span class="code-line">    <span class="code-keyword">break</span>;</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="code-keyword">case</span> <span class="code-number">0xB8</span>: <span class="code-comment">// MOV AX, imm16</span></span>
+<span class="code-line">    <span class="code-property">e</span>.reg.AX = <span class="code-function">fetch16</span>();</span>
+<span class="code-line">    <span class="code-keyword">break</span>;</span>
+<span class="code-line">  <span class="code-comment">// ... 200+ more cases ...</span></span>
+<span class="code-line">}</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">Fetch the first byte — this is the opcode, the instruction ID number.</p>
+              <p class="tl">A big decision tree: what does this byte mean?</p>
+              <p class="tl">0xF4 is the halt instruction...</p>
+              <p class="tl">...return false to signal "stop running."</p>
+              <p class="tl">0x90 is NOP — No OPeration. Literally do nothing (used for timing padding).</p>
+              <p class="tl">Break to the next iteration of the run loop.</p>
+              <p class="tl">0xB8 is "MOV AX, immediate 16-bit value"...</p>
+              <p class="tl">...fetch the next 2 bytes from memory (the number to load) and put them in AX.</p>
+              <p class="tl">There are 200+ opcodes total. The switch handles all of them.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🔑</div>
+          <div class="callout-content">
+            <strong class="callout-title">The opcode IS the instruction</strong>
+            <p>Machine code is not magic — it is just numbers. 0xF4 always means HLT. 0xB8 always means MOV AX. The CPU's switch statement is its entire vocabulary. That switch statement is what people mean when they say "hardware instruction set."</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: The run loop with requestAnimationFrame -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The run loop: 20 instructions every animation frame</h2>
+        <p>When you click "Run," the emulator uses <span class="tooltip" data-tip="requestAnimationFrame is a browser API that runs a callback 60 times per second, synchronized with the screen refresh rate. It's the standard way to animate things in browsers without wasting CPU.">requestAnimationFrame</span> to run the CPU in bursts — executing about 20 instructions per frame, then handing control back to the browser to update the UI:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">App.jsx — runLoop</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> runLoop = <span class="code-function">useCallback</span>(() => {</span>
+<span class="code-line">  <span class="code-keyword">if</span> (!runningRef.current) <span class="code-keyword">return</span>;</span>
+<span class="code-line">  <span class="code-keyword">for</span> (<span class="code-keyword">let</span> i = <span class="code-number">0</span>; i < <span class="code-number">20</span>; i++) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> ok =</span>
+<span class="code-line">      <span class="code-function">executeStep</span>(eng.current, ctx);</span>
+<span class="code-line">    <span class="code-keyword">if</span> (!ok) {</span>
+<span class="code-line">      runningRef.current = <span class="code-keyword">false</span>;</span>
+<span class="code-line">      <span class="code-keyword">break</span>;</span>
+<span class="code-line">    }</span>
+<span class="code-line">  }</span>
+<span class="code-line">  <span class="code-function">forceRender</span>();</span>
+<span class="code-line">  <span class="code-function">requestAnimationFrame</span>(runLoop);</span>
+<span class="code-line">}, []);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The main run loop function — it schedules itself to run every animation frame (~60fps).</p>
+              <p class="tl">If the user clicked Stop, quit immediately.</p>
+              <p class="tl">Execute up to 20 CPU instructions in a tight burst...</p>
+              <p class="tl">...call executeStep() once per instruction. It returns true to continue or false to halt.</p>
+              <p class="tl">If the CPU halted (HLT instruction or error)...</p>
+              <p class="tl">...mark running=false and stop the loop.</p>
+              <p class="tl">After the burst: force the React UI to re-render (show updated registers, VGA screen, etc.)</p>
+              <p class="tl">Schedule the next burst 1/60th of a second later via requestAnimationFrame — keeps the UI responsive.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 5: The data flow animation -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Watch one instruction travel through the system</h2>
+        <p>Follow a single <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">MOV AX, 0xB800</code> instruction from bytes in memory all the way to a changed register:</p>
+
+        <div class="flow-animation animate-in" style="margin-top: var(--space-6)" data-steps='[
+          {"highlight":"flow-actor-1","label":"Memory holds the bytes: B8 00 B8 at address CS:IP"},
+          {"highlight":"flow-actor-2","label":"fetch8() reads 0xB8 from memory. IP advances to next byte.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"Decoder: opcode 0xB8 = MOV AX, imm16. Fetch 2 more bytes..."},
+          {"highlight":"flow-actor-1","label":"fetch16() reads 0x00 then 0xB8 from memory. Combined = 0xB800.","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-3","label":"Execute: e.reg.AX = 0xB800. Register AX is now updated.","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-4","label":"forceRender() called. React updates the Registers Panel in the UI.","packet":true,"from":"actor-3","to":"actor-4"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">💾</div>
+              <span>Memory</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">🔍</div>
+              <span>Decoder</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">📊</div>
+              <span>AX Register</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">🖥️</div>
+              <span>React UI</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+          <div class="flow-step-label" id="flow-label">Click "Next Step" to trace the instruction</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Step mode -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The Step button — a superpower for understanding</h2>
+        <p>When you click <strong>Step</strong> in the emulator, it executes exactly one instruction and logs the bytes that were decoded. This is how low-level debugging works:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">App.jsx — stepUI</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> stepUI = <span class="code-function">useCallback</span>(() => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> e = eng.current;</span>
+<span class="code-line">  <span class="code-keyword">const</span> prevIP = e.reg.IP;</span>
+<span class="code-line">  <span class="code-function">executeStep</span>(e, ctx);</span>
+<span class="code-line">  <span class="code-keyword">const</span> bytesUsed =</span>
+<span class="code-line">    e.reg.IP - prevIP;</span>
+<span class="code-line">  <span class="code-function">addLog</span>(</span>
+<span class="code-line">    <span class="code-string">`CS:IP=</span><span class="code-operator">${</span><span class="code-function">toHex</span>(prevIP)<span class="code-operator">}</span></span>
+<span class="code-line">    <span class="code-string"> | bytes=</span><span class="code-operator">${</span>bytesUsed<span class="code-operator">}</span><span class="code-string">`</span></span>
+<span class="code-line">  );</span>
+<span class="code-line">  <span class="code-function">forceRender</span>();</span>
+<span class="code-line">}, []);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The Step function — runs one instruction and logs it.</p>
+              <p class="tl">Get the current CPU state.</p>
+              <p class="tl">Save the current IP address — this is where the instruction started.</p>
+              <p class="tl">Execute exactly one instruction.</p>
+              <p class="tl">Calculate how many bytes the instruction consumed (IP moved forward by this many).</p>
+              <p class="tl">A 1-byte instruction like HLT consumed 1. A MOV AX, imm16 consumed 3.</p>
+              <p class="tl">Log: "CS:IP=0100 | bytes=3" — tells you exactly where you were and how long the instruction was.</p>
+              <p class="tl">Force the UI to refresh so all panels show the updated state.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-6)">
+          <div class="callout-icon">🛠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Step mode = the best learning tool</strong>
+            <p>Try this: load the default Hello 8086 code, click Assemble, then Step repeatedly. Watch AX change, then ES, then SI, DI, CX. You're watching the CPU's inner monologue, one thought at a time.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Test your instincts</h2>
+
+        <div class="quiz-container" id="quiz-module4">
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Exactly! IP (Instruction Pointer) advances automatically after each byte fetch. When fetch16() runs, IP moves forward by 2. So IP always points to the next unread instruction byte — it is the read head of the CPU."
+               data-explanation-wrong="Not quite. AX only changes during the EXECUTE phase when the instruction writes to it. It is IP that changes during FETCH — it auto-advances to point to the next byte each time fetch8() is called.">
+            <h3 class="quiz-question">During the FETCH phase of MOV AX, 0xB800, which register changes automatically — before the instruction even executes?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>AX — it is being loaded with the new value</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>CS — the code segment advances to track position</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>IP — it advances automatically after each byte read, tracking the next instruction</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Right! The run loop calls executeStep() in a batch of 20 per frame, then calls requestAnimationFrame to schedule the next batch. This keeps the browser UI responsive — if you ran an infinite tight loop, the page would freeze."
+               data-explanation-wrong="requestAnimationFrame does the scheduling — it tells the browser to call runLoop again when the next screen frame is ready (~60 times per second). It is not the CPU register itself.">
+            <h3 class="quiz-question">Why does the runLoop use requestAnimationFrame instead of a simple while(true) loop?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because the 8086 CPU ran at exactly 60Hz, matching the browser frame rate</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>To keep the browser UI responsive — a while(true) loop would freeze the page and block React renders</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Because requestAnimationFrame is faster than a while loop for arithmetic</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
+
+<section class="module" id="module-5" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">05</span>
+      <h1 class="module-title">The Outside World</h1>
+      <p class="module-subtitle">BIOS interrupts, VGA memory, keyboard, disk, and the boot sequence</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What are peripherals? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The CPU is not an island</h2>
+        <p>A CPU alone can't do much. It needs to talk to the <strong>outside world</strong> — the screen, keyboard, disk, speaker. It does this via two channels: <span class="tooltip" data-tip="Memory-mapped I/O means a hardware device (like the VGA screen) is assigned a fixed range of memory addresses. Writing to those addresses controls the device — no special instructions needed.">memory-mapped I/O</span> and <span class="tooltip" data-tip="Port I/O uses special IN and OUT instructions to talk to hardware devices. Each device is assigned a port number (like a radio frequency). Port 0x60 = keyboard, port 0x61 = PC speaker.">port I/O</span>. Think of it like a hotel: room-to-room calls go through the building wiring (memory-mapped), but calls outside go through the front desk (port I/O).</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-8)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🖥️</div>
+            <h4 class="pattern-title">VGA Screen</h4>
+            <p class="pattern-desc">Write character bytes to <strong>0xB8000</strong> in memory and they appear on screen. No special instruction needed — it's just a memory write.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">⌨️</div>
+            <h4 class="pattern-title">Keyboard</h4>
+            <p class="pattern-desc">Port <strong>0x60</strong> streams scan codes. The emulator also supports BIOS INT 16h for higher-level keyboard reading.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔊</div>
+            <h4 class="pattern-title">PC Speaker</h4>
+            <p class="pattern-desc">Port <strong>0x61</strong> controls the speaker gate. Writing the frequency divisor to port <strong>0x42</strong> sets the pitch. Implemented via Web Audio API.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">💿</div>
+            <h4 class="pattern-title">Disk</h4>
+            <p class="pattern-desc">Port <strong>0x70</strong> selects a sector. Port <strong>0x71</strong> transfers it to/from memory at DS:BX. Or use BIOS INT 13h for sector reads/writes.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: BIOS interrupts -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">BIOS interrupts — the original operating system API</h2>
+        <p>Before modern <span class="tooltip" data-tip="An operating system (OS) is software that manages hardware resources and provides services to programs. DOS, Windows, Linux are all operating systems. In the 8086 era, BIOS (Basic Input/Output System) was the first layer of OS services.">operating systems</span>, programs called the <span class="tooltip" data-tip="BIOS stands for Basic Input/Output System. It's firmware stored in ROM that provides hardware abstraction services. Programs call BIOS via software interrupts (INT instructions) to read the keyboard, draw to the screen, and access the disk.">BIOS</span> directly for hardware services. The mechanism is the <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #CBA6F7; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">INT</code> instruction — a software interrupt. Like pressing a service button in an elevator:</p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); margin-top: var(--space-6)">
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-1)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-1); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 10h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Video Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=00</span> → Set video mode / clear screen</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=02</span> → Set cursor position (DH=row, DL=col)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=09</span> → Write character+attr at cursor (AL=char, BL=attr)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-1)">AH=0E</span> → Write char in TTY mode (auto-scroll)</div>
+            </div>
+          </div>
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-2)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-2); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 16h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Keyboard Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=00</span> → Wait for a keypress, return in AX</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=01</span> → Check if key available (ZF=0 if yes)</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-2)">AH=02</span> → Get shift/ctrl/alt key status byte</div>
+            </div>
+          </div>
+          <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-5); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-actor-4)">
+            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3)">
+              <div style="background: var(--color-actor-4); color: white; font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); font-weight: 700">INT 13h</div>
+              <span style="font-family: var(--font-display); font-weight: 600">Disk Services</span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: var(--text-xs); display: grid; gap: var(--space-1)">
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=02</span> → Read sectors to ES:BX buffer</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=03</span> → Write sectors from ES:BX buffer</div>
+              <div style="background: var(--color-bg); padding: var(--space-2); border-radius: var(--radius-sm)"><span style="color: var(--color-actor-4)">AH=08</span> → Get drive geometry (cylinders, heads, sectors)</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: INT 10h in code -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Inside the BIOS video handler</h2>
+        <p>When your assembly code calls <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: var(--text-sm)">INT 10h</code>, control jumps to <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">handleInt10</code> in <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">CPU8086.js</code>:</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CPU8086.js — handleInt10 (partial)</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">const</span> handleInt10 = (<span class="code-property">e</span>) => {</span>
+<span class="code-line">  <span class="code-keyword">const</span> ah =</span>
+<span class="code-line">    (<span class="code-property">e</span>.reg.AX >> <span class="code-number">8</span>) & <span class="code-number">0xFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">const</span> al =</span>
+<span class="code-line">    <span class="code-property">e</span>.reg.AX & <span class="code-number">0xFF</span>;</span>
+<span class="code-line">  <span class="code-keyword">if</span> (ah === <span class="code-number">0x0E</span>) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> idx = <span class="code-property">VGA_BASE</span></span>
+<span class="code-line">      + (<span class="code-property">e</span>.cursorY * <span class="code-number">80</span></span>
+<span class="code-line">      + <span class="code-property">e</span>.cursorX) * <span class="code-number">2</span>;</span>
+<span class="code-line">    <span class="code-property">e</span>.mem[idx]     = al;</span>
+<span class="code-line">    <span class="code-property">e</span>.mem[idx + <span class="code-number">1</span>] = <span class="code-number">0x07</span>;</span>
+<span class="code-line">    <span class="code-property">e</span>.cursorX++;</span>
+<span class="code-line">  }</span>
+<span class="code-line">};</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label" style="color: var(--color-text-muted)">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">The BIOS video interrupt handler — called whenever assembly code runs INT 10h.</p>
+              <p class="tl">Read the high byte of AX (the "function selector")...</p>
+              <p class="tl">...AH tells us which video service was requested.</p>
+              <p class="tl">Read the low byte of AX (the character to print).</p>
+              <p class="tl">AH=0x0E means "TTY write" — print a character at the cursor position.</p>
+              <p class="tl">Calculate the VGA memory address: base 0xB8000 + (row × 80 + column) × 2 bytes per cell.</p>
+              <p class="tl">Write the character byte to that address. Now it shows on screen!</p>
+              <p class="tl">Write 0x07 (white on black) as the color attribute for this cell.</p>
+              <p class="tl">Move the cursor one column to the right — ready for the next character.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: VGA memory visualization -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The VGA screen IS a piece of memory</h2>
+        <p>The 80×25 text screen is literally 4,000 bytes (80 columns × 25 rows × 2 bytes per cell) starting at address <strong>0xB8000</strong>. The React <code style="font-family: var(--font-mono); background: var(--color-bg-code); color: #89B4FA; padding: 2px 5px; border-radius: 3px; font-size: var(--text-sm)">VGAMonitor</code> component reads this memory and renders it 60 times per second:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-6); box-shadow: var(--shadow-md); margin-top: var(--space-6)">
+          <!-- VGA grid visualization -->
+          <div style="text-align: center; margin-bottom: var(--space-4)">
+            <span style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em">Memory at 0xB8000 → Screen cells</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; font-family: var(--font-mono); font-size: 10px; margin-bottom: var(--space-4)">
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F38BA8; font-weight: 700">H</div>
+              <div style="color: #6C7086; font-size: 8px">48 0C</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F9E2AF; font-weight: 700">e</div>
+              <div style="color: #6C7086; font-size: 8px">65 0E</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #A6E3A1; font-weight: 700">l</div>
+              <div style="color: #6C7086; font-size: 8px">6C 0A</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #94E2D5; font-weight: 700">l</div>
+              <div style="color: #6C7086; font-size: 8px">6C 0B</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #89B4FA; font-weight: 700">o</div>
+              <div style="color: #6C7086; font-size: 8px">6F 09</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; opacity: 0.4; border: 1px solid rgba(255,255,255,0.05)">
+              <div style="color: #CDD6F4">·</div>
+              <div style="color: #6C7086; font-size: 8px">20 07</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #CBA6F7; font-weight: 700">8</div>
+              <div style="color: #6C7086; font-size: 8px">38 0D</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F38BA8; font-weight: 700">0</div>
+              <div style="color: #6C7086; font-size: 8px">30 0C</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #F9E2AF; font-weight: 700">8</div>
+              <div style="color: #6C7086; font-size: 8px">38 0E</div>
+            </div>
+            <div style="background: var(--color-bg-code); padding: 6px; border-radius: 4px; text-align: center; border: 1px solid rgba(248,232,140,0.3)">
+              <div style="color: #A6E3A1; font-weight: 700">6</div>
+              <div style="color: #6C7086; font-size: 8px">36 0A</div>
+            </div>
+          </div>
+          <p style="font-size: var(--text-xs); color: var(--color-text-secondary); text-align: center">Each cell shows: character (top) · hex bytes in memory (bottom). Low byte = ASCII · High byte = color (0x0C = light red, 0x0E = yellow, etc.)</p>
+        </div>
+      </section>
+
+      <!-- Screen 5: The boot sequence -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The boot sequence — from power-on to running code</h2>
+        <p>When you click the <strong>Boot</strong> button in the emulator, it replays the exact sequence a real PC does at startup. Understanding this is knowing the blueprint of every operating system ever written:</p>
+
+        <div class="chat-window" id="chat-boot" style="margin-top: var(--space-6)">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="cpu" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">CPU</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">CPU (after power-on)</span>
+                <p>I just turned on. My IP is set to 0xFFF0 — the reset vector. I start executing whatever code is there.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="bios" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">BIOS</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">BIOS (at reset vector)</span>
+                <p>I load disk sector 0 (the first 512 bytes of the virtual disk) into memory at address 0x7C00...</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="bios" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-2)">BIOS</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-2)">BIOS</span>
+                <p>I check the last two bytes of sector 0: are they 0x55 and 0xAA? That is the boot signature — it means "this disk is bootable." If not, I refuse to boot.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="cpu" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-1)">CPU</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-1)">CPU</span>
+                <p>Boot signature found! BIOS sets CS=0x0000 and IP=0x7C00. I jump to 0x7C00 and start executing the boot sector code. This could be a bootloader, or a tiny OS, or a Hello World.</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="disk" style="display:none">
+              <div class="chat-avatar" style="background: var(--color-actor-4)">DISK</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: var(--color-actor-4)">Virtual Disk</span>
+                <p>I am a 128 KB array. Sectors 0-255 each hold 512 bytes. You can write bootable code to me using the Disk Viewer, then click Boot to run it!</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-boot-typing" style="display:none">
+            <div class="chat-avatar" id="chat-boot-typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">Next</button>
+            <button class="btn chat-all-btn">Play All</button>
+            <button class="btn chat-reset-btn">Replay</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 6: Putting it all together -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">The complete picture</h2>
+        <p>You now know the entire stack. From transistors to text on screen — here it is in one view:</p>
+
+        <div style="background: var(--color-surface); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); margin-top: var(--space-6)">
+          <div style="background: var(--color-actor-1); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🧑‍💻 You (Assembly Code)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Write human-readable instructions in NASM syntax</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ Assembler8086.js translates to bytes</div>
+          <div style="background: var(--color-actor-2); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">💾 1 MB Memory Array</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Program bytes load at ORG address. VGA at 0xB8000. Stack at SS:SP.</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ CPU8086.js fetches, decodes, executes</div>
+          <div style="background: var(--color-actor-4); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🧠 CPU (Registers + Flags)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">AX, BX, CS:IP, SP — state changes with every instruction executed</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ Devices read/write memory and ports</div>
+          <div style="background: var(--color-actor-5); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🌍 Devices (VGA · Keyboard · Disk · Speaker)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Hardware peripherals respond to memory writes and port I/O</p>
+          </div>
+          <div style="padding: var(--space-2) var(--space-6); text-align: center; background: var(--color-bg-warm); font-size: 1.2rem">↓ App.jsx forceRender() updates the UI</div>
+          <div style="background: var(--color-actor-3); color: white; padding: var(--space-4) var(--space-6)">
+            <strong style="font-family: var(--font-display); font-size: var(--text-lg)">🖥️ React UI (VGA Monitor + Panels)</strong>
+            <p style="font-size: var(--text-sm); opacity: 0.9; margin-top: var(--space-1)">Characters appear on screen. Registers update. System log shows execution trail.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-8)">
+          <div class="callout-icon">🏆</div>
+          <div class="callout-content">
+            <strong class="callout-title">You now speak computer architecture</strong>
+            <p>Registers. Segmented memory. Fetch-Decode-Execute. Memory-mapped I/O. BIOS interrupts. These are not just buzzwords — they are the actual vocabulary of how every computer that has ever existed works under the hood.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Final challenge</h2>
+
+        <div class="quiz-container" id="quiz-module5">
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="Exactly! Writing directly to 0xB8000 in memory (via ES=0xB800, then [ES:DI]) bypasses the BIOS entirely and is the fastest way to put text on screen. BIOS INT 10h does the same thing but adds overhead. Direct VGA writes are what demo coders and early game developers used."
+               data-explanation-wrong="INT 10h works, but it goes through the BIOS handler which has overhead. Direct VGA memory writes at 0xB8000 are faster and give you full color control per character cell.">
+            <h3 class="quiz-question">You want to display colored text as fast as possible — one character at a time with precise color control. What is the most direct approach?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Write char+color bytes directly to memory at 0xB8000 (ES=0xB800, then [ES:DI])</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 10h with AH=0x0E for every character</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Use OUT instructions to port 0x3D4 to control character display</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Right! The boot signature is 0x55 0xAA at bytes 510-511 of sector 0. Without it, BIOS refuses to execute the sector. This prevents accidentally booting from corrupt or non-bootable media."
+               data-explanation-wrong="The boot signature is not an instruction — it is a magic number at the end of sector 0 that BIOS checks. 0x55AA tells BIOS: this sector is intentionally bootable.">
+            <h3 class="quiz-question">You write a boot sector program but clicking Boot does nothing — the emulator does not execute your code. What is the most likely cause?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The first instruction must be a JMP — BIOS requires it as the entry point marker</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The boot signature (bytes 0x55, 0xAA at offset 510-511) is missing from sector 0</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>You used INT 10h before the video mode was initialized</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Correct! INT 16h AH=00 blocks (waits) until a key is pressed, then returns the key in AX. This is perfect for interactive programs — the loop reads a key, processes it, and repeats. It is the 8086 equivalent of reading a line from stdin."
+               data-explanation-wrong="INT 10h is video services, not keyboard. Port 0x60 is the raw hardware level but needs more complex handling (scan codes, shift states). INT 16h is the clean BIOS API for keyboard input.">
+            <h3 class="quiz-question">You are writing an interactive 8086 program. You want to read keypresses from the user in a loop. What is the correct approach?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 10h with AH=00 to read keyboard input into AX</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Continuously read from memory address 0x0417 to check for key presses</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Call INT 16h with AH=00 — it waits for a keypress and returns the ASCII code in AL</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
+  </main>
+
+</body>
+</html>
+

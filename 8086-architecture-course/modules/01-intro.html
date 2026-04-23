@@ -1,0 +1,205 @@
+<section class="module" id="module-1" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">01</span>
+      <h1 class="module-title">The Machine That Started It All</h1>
+      <p class="module-subtitle">Meet the Intel 8086 — the chip that runs inside this browser tab right now</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- Screen 1: What is this thing? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">You're running a 1978 computer in your browser</h2>
+        <p>In 1978, Intel released a <span class="tooltip" data-tip="A microprocessor is a tiny chip — smaller than a thumbnail — that executes billions of instructions per second. It's the brain of every computer, phone, and smart device.">microprocessor</span> called the <strong>Intel 8086</strong>. It powered the very first IBM PCs. Every modern x86 chip — your laptop, your server, your gaming PC — is a direct descendant of it. This emulator lets you run 8086 code right here, right now, in JavaScript.</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-8)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📅</div>
+            <h4 class="pattern-title">Born in 1978</h4>
+            <p class="pattern-desc">Intel 8086 introduced the x86 architecture — still alive in every Windows PC today, 45+ years later.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">💾</div>
+            <h4 class="pattern-title">1 Megabyte of RAM</h4>
+            <p class="pattern-desc">The 8086 could address exactly 1,048,576 bytes (1 MB). Modern chips address billions of times more.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🌐</div>
+            <h4 class="pattern-title">100% in JavaScript</h4>
+            <p class="pattern-desc">This emulator faithfully re-creates the 8086 hardware in JS — every register, every flag, every memory byte.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: What does the emulator look like? -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">A computer inside a web page</h2>
+        <p>When you open this emulator, you're looking at a virtual computer with real hardware components — all simulated in JavaScript. Here's everything on screen at once:</p>
+
+        <div class="arch-diagram animate-in" style="margin-top: var(--space-8)">
+          <div class="arch-zone" style="border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-6); background: var(--color-surface-warm)">
+            <h4 class="arch-zone-label" style="font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-text-muted); margin-bottom: var(--space-4)">8086 Emulator — All Components</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3)">
+              <div class="arch-component" data-desc="Where you type NASM assembly instructions. The ORG field sets where code loads in memory." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">✏️</div>
+                <strong style="font-size: var(--text-sm)">Code Editor</strong>
+              </div>
+              <div class="arch-component" data-desc="Translates your assembly text into binary machine code bytes that the CPU can execute." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">⚙️</div>
+                <strong style="font-size: var(--text-sm)">Assembler</strong>
+              </div>
+              <div class="arch-component" data-desc="The CPU core: decodes and executes one x86 opcode at a time using the hardware binary decoder engine." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">🧠</div>
+                <strong style="font-size: var(--text-sm)">CPU8086</strong>
+              </div>
+              <div class="arch-component" data-desc="An 80×25 text grid reading from memory address 0xB8000. Each character cell is 2 bytes: ASCII code + color attribute." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">🖥️</div>
+                <strong style="font-size: var(--text-sm)">VGA Monitor</strong>
+              </div>
+              <div class="arch-component" data-desc="Live view of AX, BX, CX, DX and all 14 CPU registers. Flags like ZF (zero flag) and CF (carry flag) update in real time." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">📊</div>
+                <strong style="font-size: var(--text-sm)">Registers Panel</strong>
+              </div>
+              <div class="arch-component" data-desc="A hex view of the virtual disk (128 KB). Used for booting — the BIOS loads sector 0 into address 0x7C00 and jumps there." onclick="showArchDesc(this)" style="background: var(--color-bg-code); color: #CDD6F4; border-radius: var(--radius-sm); padding: var(--space-4); cursor: pointer; text-align: center; transition: transform 0.2s">
+                <div style="font-size: 1.5rem; margin-bottom: var(--space-2)">💿</div>
+                <strong style="font-size: var(--text-sm)">Disk Viewer</strong>
+              </div>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc" style="margin-top: var(--space-4); padding: var(--space-4); background: var(--color-accent-light); border-left: 3px solid var(--color-accent); border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-secondary); min-height: 3rem">
+            👆 Click any component to learn what it does
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: The journey — tracing a program -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">From text to pixels — what happens when you click "Assemble"?</h2>
+        <p>Imagine you type <code style="background: var(--color-bg-code); color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: var(--text-sm)">mov ax, 0xB800</code> and hit Assemble. Here's the journey:</p>
+
+        <div class="flow-steps animate-in" style="margin-top: var(--space-8)">
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-1)">1</div>
+            <p><strong>You write</strong> NASM assembly text in the Code Editor</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-2)">2</div>
+            <p><strong>Assembler8086</strong> converts your text to raw bytes (machine code)</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-3)">3</div>
+            <p><strong>Bytes load</strong> into the 1 MB memory array at the ORG address</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-4)">4</div>
+            <p><strong>CPU8086</strong> fetches, decodes, and executes each instruction one by one</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num" style="background: var(--color-actor-5)">5</div>
+            <p><strong>VGA monitor</strong> reads memory at 0xB8000 and renders colored characters on screen</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent" style="margin-top: var(--space-8)">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">Why does this matter for you?</strong>
+            <p>Every modern computer — your laptop, your phone — still follows this same pipeline: text → compiler/assembler → machine code → CPU → output. The 8086 is the simplest possible example of this universal pattern. Understand the 8086, understand computing.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 4: The three source files -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Three files power this entire emulator</h2>
+        <p>The whole system is built from just three <span class="tooltip" data-tip="A source file is a text file containing code. When compiled or interpreted, it becomes software that runs on a computer.">source files</span>:</p>
+
+        <div class="pattern-cards stagger-children" style="margin-top: var(--space-6)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">CPU8086.js</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The CPU Brain</h4>
+            <p class="pattern-desc">~2,500 lines. Implements the hardware: registers, flags, 1 MB memory, and a binary decoder that executes every 8086 instruction.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">Assembler8086.js</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The Translator</h4>
+            <p class="pattern-desc">~500 lines. A two-pass NASM-compatible assembler that converts human-readable assembly instructions to binary machine code bytes.</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4); font-size: var(--text-xs); color: white; font-family: var(--font-mono); padding: 4px 8px; border-radius: var(--radius-sm)">App.jsx</div>
+            <h4 class="pattern-title" style="margin-top: var(--space-3)">The Control Room</h4>
+            <p class="pattern-desc">~2,000 lines. The React UI — code editor, VGA monitor, register display, memory viewer, disk viewer, and the run/step loop.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info" style="margin-top: var(--space-8)">
+          <div class="callout-icon">🔑</div>
+          <div class="callout-content">
+            <strong class="callout-title">The Vocabulary Win</strong>
+            <p>After this course, you'll know exactly what to tell an AI agent: "in the CPU8086 execution engine," "in the assembler opcode table," "in the VGA renderer" — instead of "in the code somewhere." Precision speeds up everything.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quiz -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Check your understanding</h2>
+
+        <div class="quiz-container" id="quiz-module1">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="Exactly! The Assembler8086 converts assembly text to bytes, then those bytes are loaded into memory for the CPU to execute."
+               data-explanation-wrong="Not quite — the VGA monitor only reads memory (at 0xB8000) to render pixels. It does not convert code. That is the assembler's job.">
+            <h3 class="quiz-question">You type assembly code and click Assemble. Which component is responsible for turning your text into binary bytes the CPU can execute?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The VGA Monitor — it reads memory and displays characters</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The Assembler8086 — it translates text instructions to machine code bytes</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>The Registers Panel — it tracks what the CPU is doing</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="Correct! CPU8086.js is the hardware brain. App.jsx is the control room (UI). Assembler8086.js is the translator. Three very different roles."
+               data-explanation-wrong="Close, but App.jsx is more like the control room — it handles the UI, buttons, and run loop. CPU8086.js is the actual hardware emulation.">
+            <h3 class="quiz-question">A colleague says the emulator has a bug — instructions are executing in the wrong order. Which file would you look at first?</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>App.jsx — this is where all the important logic lives</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Assembler8086.js — the assembler might be generating wrong bytes</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>CPU8086.js — the execution engine is where instruction order is controlled</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module1')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module1')">Try Again</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>
