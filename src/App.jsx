@@ -7,7 +7,7 @@ import { DiskDevice } from './devices/DiskDevice.js';
 import { KeyboardDevice } from './devices/KeyboardDevice.js';
 import { PIC8259Device } from './devices/PIC8259Device.js';
 import {
-    ADDR_SPACE, DISK_SIZE, SECTOR_SIZE,
+    ADDR_SPACE, DISK_SIZE, SECTOR_SIZE, FLOPPY_SIZE,
     VGA_BASE, VGA_COLS, VGA_ROWS, VGA_SIZE,
     toHex, calcPhys, calcParity,
     readMem8, writeMem8, writeMem8Safe,
@@ -416,6 +416,99 @@ function DiskViewer({ diskMemory }) {
     );
 }
 
+function FloppyDiskViewer({ floppyMemory, onLoadFloppy }) {
+    const BLOCKS_PER_PAGE = 64;
+    const BLOCK_SIZE = 16;
+    const TOTAL_BLOCKS = Math.floor(floppyMemory.length / BLOCK_SIZE);
+    const TOTAL_PAGES = Math.ceil(TOTAL_BLOCKS / BLOCKS_PER_PAGE);
+
+    const [page, setPage] = React.useState(0);
+    const [maximized, setMaximized] = React.useState(false);
+    const fileInputRef = React.useRef(null);
+    const pageStart = page * BLOCKS_PER_PAGE;
+
+    const handleFileLoad = (ev) => {
+        const file = ev.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            onLoadFloppy && onLoadFloppy(new Uint8Array(e.target.result));
+        };
+        reader.readAsArrayBuffer(file);
+        ev.target.value = '';
+    };
+
+    return (
+        <div className={maximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900" : "bg-slate-900 rounded-xl border border-slate-800 flex flex-col overflow-hidden shadow-xl h-40"}>
+            <div className="bg-slate-950/50 px-4 py-2 border-b border-slate-800 flex justify-between items-center gap-2">
+                <h2 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest font-mono whitespace-nowrap">Floppy Disk A:</h2>
+                <div className="flex items-center gap-2 ml-auto">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".img,.flp,.bin"
+                        className="hidden"
+                        onChange={handleFileLoad}
+                    />
+                    <button
+                        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        className="px-2 py-0.5 text-[10px] bg-cyan-800 hover:bg-cyan-700 text-slate-200 rounded transition-colors font-bold"
+                        title="Load floppy image (.img/.flp/.bin)"
+                    >📂 Load</button>
+                    <button
+                        onClick={() => setPage(p => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-30 transition-colors font-bold"
+                    >◀</button>
+                    <select
+                        value={page}
+                        onChange={e => setPage(Number(e.target.value))}
+                        className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-cyan-400 text-[10px] font-mono focus:outline-none focus:border-cyan-500"
+                    >
+                        {Array.from({ length: TOTAL_PAGES }).map((_, p) => {
+                            const blkStart = p * BLOCKS_PER_PAGE;
+                            const byteStart = blkStart * BLOCK_SIZE;
+                            return (
+                                <option key={p} value={p}>
+                                    {`Pg ${p}  0x${byteStart.toString(16).toUpperCase().padStart(6, '0')}–0x${(byteStart + BLOCKS_PER_PAGE * BLOCK_SIZE - 1).toString(16).toUpperCase().padStart(6, '0')}`}
+                                </option>
+                            );
+                        })}
+                    </select>
+                    <button
+                        onClick={() => setPage(p => Math.min(TOTAL_PAGES - 1, p + 1))}
+                        disabled={page === TOTAL_PAGES - 1}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-30 transition-colors font-bold"
+                    >▶</button>
+                    <button
+                        onClick={() => setMaximized(m => !m)}
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors font-bold"
+                        title={maximized ? 'Restore' : 'Maximize'}
+                    >{maximized ? '↙ Restore' : '↗ Max'}</button>
+                </div>
+            </div>
+            <div className={`p-3 overflow-auto flex-1 font-mono text-[9px] bg-slate-950/50 custom-scrollbar gap-2 ${maximized ? 'grid grid-cols-8' : 'grid grid-cols-4'}`}>
+                {Array.from({ length: BLOCKS_PER_PAGE }).map((_, i) => {
+                    const absBlock = pageStart + i;
+                    const diskOff = absBlock * BLOCK_SIZE;
+                    return (
+                        <div key={i} className="flex flex-col border border-slate-800 p-1 rounded">
+                            <span className="text-slate-600 mb-1">BLK {absBlock.toString(16).toUpperCase().padStart(4, '0')}</span>
+                            <div className="flex flex-wrap gap-1">
+                                {Array.from({ length: BLOCK_SIZE }).map((_, b) => (
+                                    <span key={b} className={floppyMemory[diskOff + b] !== 0 ? "text-cyan-400" : "text-slate-900"}>
+                                        {(floppyMemory[diskOff + b] || 0).toString(16).toUpperCase().padStart(2, '0')}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function MemoryViewer({ title = "Memory View", getMemByte, memSegStr, setMemSegStr, memOffStr, setMemOffStr, hasToggle = false, isToggled = false, onToggle, onMemoryChange, isRunning, onLoadMemory }) {
     const [maximized, setMaximized] = React.useState(false);
     const seg = parseInt(memSegStr.replace(/0x/i, ''), 16) || 0;
@@ -621,6 +714,7 @@ export default function Emulator8086() {
         flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
         mem: new Uint8Array(ADDR_SPACE),
         disk: new Uint8Array(DISK_SIZE),
+        floppy: new Uint8Array(FLOPPY_SIZE),
         cursorX: 0,
         cursorY: 0
     });
@@ -638,6 +732,14 @@ export default function Emulator8086() {
         writeMem8Safe(eng.current, addr, val);
         forceRender();
     };
+
+    const handleLoadFloppy = useCallback((data) => {
+        const e = eng.current;
+        const len = Math.min(data.length, FLOPPY_SIZE);
+        e.floppy.set(data.subarray(0, len));
+        addLog(`Loaded ${len} bytes into Floppy A:`);
+        forceRender();
+    }, []);
 
     const handleLoadMemory = (startAddr, data, filename) => {
         const e = eng.current;
@@ -1111,6 +1213,7 @@ export default function Emulator8086() {
                                 onLoadMemory={handleLoadMemory}
                             />
                         )}
+                        <FloppyDiskViewer floppyMemory={e.floppy} onLoadFloppy={handleLoadFloppy} />
                         <DiskViewer diskMemory={e.disk} />
                     </div>
 

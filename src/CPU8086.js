@@ -7,6 +7,12 @@ const ADDR_SPACE     = 1048576; // Total address space (1 MB)
 const DISK_SIZE      = 131072;  // Virtual disk size (128 KB)
 const SECTOR_SIZE    = 512;     // Standard disk sector size
 
+// --- FLOPPY CONSTANTS (3.5" 1.44 MB) ---
+const FLOPPY_SIZE              = 1474560; // 1.44 MB (2880 sectors × 512 bytes)
+const FLOPPY_HEADS             = 2;
+const FLOPPY_SECTORS_PER_TRACK = 18;
+const FLOPPY_CYLINDERS         = 80;
+
 const VGA_BASE       = 0xB8000; // VGA text mode VRAM base address
 const VGA_COLS       = 80;      // VGA text mode columns
 const VGA_ROWS       = 25;      // VGA text mode rows
@@ -113,13 +119,78 @@ const handleInt10 = (e) => {
     }
 };
 
+// INT 13h handler for first floppy disk (DL=0x00)
+const handleFloppyInt13 = (e, ah, al) => {
+    if (ah === 0x00) {
+        // Reset — return success
+        e.reg.AX &= 0x00FF;
+        e.flags.CF = 0;
+    } else if (ah === 0x01) {
+        // Get status — return success
+        e.reg.AX &= 0x00FF;
+        e.flags.CF = 0;
+    } else if (ah === 0x02 || ah === 0x03) {
+        // Read (02h) / Write (03h) sectors
+        const isRead = (ah === 0x02);
+        const count = al;
+        const cl = e.reg.CX & 0xFF;
+        const ch = (e.reg.CX >> 8) & 0xFF;
+        const sector   = cl & 0x3F;                   // bits 0-5 of CL (1-based)
+        const cylinder = ch | ((cl & 0xC0) << 2);     // CH + bits 6-7 of CL
+        const head     = (e.reg.DX >> 8) & 0xFF;      // DH
+
+        const lba    = (cylinder * FLOPPY_HEADS + head) * FLOPPY_SECTORS_PER_TRACK + (sector - 1);
+        const offset = lba * SECTOR_SIZE;
+
+        if (sector === 0 || offset < 0 || offset + count * SECTOR_SIZE > FLOPPY_SIZE) {
+            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 sector not found
+            e.flags.CF = 1;
+            return;
+        }
+
+        const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
+        for (let i = 0; i < count * SECTOR_SIZE; i++) {
+            if (isRead) {
+                writeMem8Safe(e, (bufAddr + i) & (ADDR_SPACE - 1), e.floppy[offset + i]);
+            } else {
+                e.floppy[offset + i] = readMem8(e, (bufAddr + i) & (ADDR_SPACE - 1));
+            }
+        }
+        e.reg.AX &= 0x00FF; // AH=0 success, AL preserved (sectors transferred)
+        e.flags.CF = 0;
+    } else if (ah === 0x08) {
+        // Get drive parameters — 3.5" 1.44 MB
+        e.reg.AX = 0x0000;
+        e.reg.BX = 0x0004; // drive type 04h = 3.5" 1.44 MB
+        e.reg.CX = ((FLOPPY_CYLINDERS - 1) << 8) | FLOPPY_SECTORS_PER_TRACK;
+        e.reg.DX = ((FLOPPY_HEADS - 1) << 8) | 0x01; // DH=max head, DL=1 drive
+        e.flags.CF = 0;
+    } else if (ah === 0x15) {
+        // Get disk type — floppy with change-line support
+        const total = FLOPPY_SIZE / SECTOR_SIZE; // 2880
+        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0200; // AH=02 floppy w/ change-line
+        e.reg.CX = (total >> 16) & 0xFFFF;
+        e.reg.DX = total & 0xFFFF;
+        e.flags.CF = 0;
+    } else {
+        // Other subfunctions — return success
+        e.reg.AX &= 0x00FF;
+        e.flags.CF = 0;
+    }
+};
+
 const handleInt13 = (e) => {
     const ah = (e.reg.AX >> 8) & 0xFF;
     const al = e.reg.AX & 0xFF;
     const dl = e.reg.DX & 0xFF;
 
-    // Only handle first hard disk (0x80)
-    if (dl !== 0x80) {
+    // Dispatch on drive number
+    if (dl === 0x00) {
+        // First floppy disk (A:)
+        handleFloppyInt13(e, ah, al);
+        return;
+    } else if (dl !== 0x80) {
+        // Unsupported drive
         e.reg.AX = (e.reg.AX & 0x00FF) | 0x0100; // AH=01 (invalid parameter)
         e.flags.CF = 1;
         return;
@@ -762,6 +833,7 @@ export {
     ADDR_SPACE,
     DISK_SIZE,
     SECTOR_SIZE,
+    FLOPPY_SIZE,
     VGA_BASE,
     VGA_COLS,
     VGA_ROWS,
