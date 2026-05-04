@@ -86,6 +86,19 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
                 </div>
             </div>
             <div className="flex flex-wrap gap-2 mt-4 md:mt-0 justify-center items-center">
+                <a
+                    href="https://github.com/daohainam/emulator-8086-js"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group px-4 py-2 rounded-lg text-sm font-bold border border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 hover:border-amber-300/70 transition-all shadow-lg"
+                    title="Star this project on GitHub"
+                    aria-label="Star emulator-8086-js on GitHub"
+                >
+                    <span className="inline-flex items-center gap-1">
+                        <span aria-hidden="true">☆</span>
+                        Star on GitHub
+                    </span>
+                </a>
                 <label className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 cursor-pointer flex items-center">
                     <span className="mr-1">📥</span> Load from JSON
                     <input type="file" accept=".json" className="hidden" onChange={loadStateFromJson} disabled={isRunning} />
