@@ -20,11 +20,17 @@ const VGA_SIZE       = VGA_COLS * VGA_ROWS * 2; // 4000 Bytes
 
 const toHex = (n, pad = 4) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(pad, '0');
 const calcPhys = (s, o) => (((s & 0xFFFF) << 4) + (o & 0xFFFF)) & (ADDR_SPACE - 1);
-const calcParity = (val) => {
-    let p = 0, v = val & 0xFF;
-    while (v) { p ^= (v & 1); v >>= 1; }
-    return (p === 0) ? 1 : 0;
-};
+
+const PARITY_TABLE = (() => {
+    const t = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+        let p = 1, x = i;
+        while (x) { p ^= 1; x &= x - 1; }
+        t[i] = p;
+    }
+    return t;
+})();
+const calcParity = (val) => PARITY_TABLE[val & 0xFF];
 
 // ===============================================
 // CORE: MEMORY MANAGER
@@ -50,6 +56,42 @@ const unpackFlags = (e, r) => {
     f.CF = (r & (1<<0)) ? 1 : 0; f.PF = (r & (1<<2)) ? 1 : 0; f.AF = (r & (1<<4)) ? 1 : 0;
     f.ZF = (r & (1<<6)) ? 1 : 0; f.SF = (r & (1<<7)) ? 1 : 0; f.IF = (r & (1<<9)) ? 1 : 0;
     f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
+};
+
+// AF (auxiliary/half-carry) flag — set when carry/borrow crosses the low nibble.
+const computeAF = (dst, src, res) => ((dst ^ src ^ res) & 0x10) ? 1 : 0;
+
+// Compute one 8086 ALU operation and the resulting flag set.
+// op: 0=ADD 1=OR 2=ADC 3=SBB 4=AND 5=SUB 6=XOR 7=CMP
+const aluCompute = (op, dst, src, isWord, cfIn) => {
+    const mask = isWord ? 0xFFFF : 0xFF;
+    const signBit = isWord ? 0x8000 : 0x80;
+    let raw, CF = 0, OF = 0, AF = 0;
+    if (op === 0)        { raw = dst + src;             CF = raw > mask ? 1 : 0; OF = ((dst ^ raw) & (src ^ raw) & signBit) ? 1 : 0; AF = computeAF(dst, src, raw); }
+    else if (op === 1)   { raw = dst | src; }
+    else if (op === 2)   { raw = dst + src + cfIn;      CF = raw > mask ? 1 : 0; OF = ((dst ^ raw) & (src ^ raw) & signBit) ? 1 : 0; AF = computeAF(dst, src, raw); }
+    else if (op === 3)   { raw = dst - src - cfIn;      CF = dst < (src + cfIn) ? 1 : 0; OF = ((dst ^ src) & (dst ^ raw) & signBit) ? 1 : 0; AF = computeAF(dst, src, raw); }
+    else if (op === 4)   { raw = dst & src; }
+    else if (op === 5 || op === 7) { raw = dst - src;   CF = dst < src ? 1 : 0; OF = ((dst ^ src) & (dst ^ raw) & signBit) ? 1 : 0; AF = computeAF(dst, src, raw); }
+    else                 { raw = dst ^ src; }
+    const res = raw & mask;
+    return { res, write: op !== 7, CF, OF, AF, ZF: res === 0 ? 1 : 0, SF: (res & signBit) ? 1 : 0, PF: PARITY_TABLE[res & 0xFF] };
+};
+
+// Apply an ALU result's flag set to engine flags.
+const applyAluFlags = (e, r) => {
+    e.flags.CF = r.CF; e.flags.OF = r.OF; e.flags.AF = r.AF;
+    e.flags.ZF = r.ZF; e.flags.SF = r.SF; e.flags.PF = r.PF;
+};
+
+// Raise a CPU interrupt: push flags, clear IF, push CS:IP, jump through IVT[vector].
+const raiseInt = (e, vector) => {
+    push16(e, packFlags(e));
+    e.flags.IF = 0;
+    push16(e, e.reg.CS);
+    push16(e, e.reg.IP);
+    e.reg.IP = readMemWord(e, calcPhys(0, vector * 4));
+    e.reg.CS = readMemWord(e, calcPhys(0, vector * 4 + 2));
 };
 
 // ===============================================
@@ -372,7 +414,8 @@ const executeBinaryStep = (e, ctx) => {
     let segOv = null;
     let repPrefix = 0;
     let op = fetch8();
-    while ([0x26, 0x2E, 0x36, 0x3E, 0xF2, 0xF3].includes(op)) {
+    // 0xF0 (LOCK) is consumed but has no semantic effect in single-CPU emulation.
+    while ([0x26, 0x2E, 0x36, 0x3E, 0xF0, 0xF2, 0xF3].includes(op)) {
         if (op===0x26) segOv=e.reg.ES; if (op===0x2E) segOv=e.reg.CS;
         if (op===0x36) segOv=e.reg.SS; if (op===0x3E) segOv=e.reg.DS;
         if (op===0xF2 || op===0xF3) repPrefix = op;
@@ -404,8 +447,13 @@ const executeBinaryStep = (e, ctx) => {
         e.flags.SF = (r & (isWord?0x8000:0x80)) ? 1 : 0;
     };
 
-    if (op === 0x90) return true;
-    if (op === 0xF4) return false;
+    if (op === 0x90) return true;       // NOP
+    if (op === 0x9B) return true;       // WAIT — no FPU, treat as NOP
+    if (op === 0xF4) return false;      // HLT
+
+    // INT 3 (one-byte breakpoint) and INTO (interrupt-if-overflow) — raise IVT-dispatched interrupts.
+    if (op === 0xCC) { raiseInt(e, 3); return true; }
+    if (op === 0xCE) { if (e.flags.OF) raiseInt(e, 4); return true; }
     
     if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI
     if (op === 0xFB) { e.flags.IF = 1; return true; } // STI
@@ -428,18 +476,19 @@ const executeBinaryStep = (e, ctx) => {
     if (op === 0xC6) { const m = modrmDec(false); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
     if (op === 0xC4 || op === 0xC5) { const m = modrmDec(true); if (m.mod===3) throw new Error("LDS/LES needs mem"); const off=readMemWord(e, m.addr); const seg=readMemWord(e, (m.addr+2)&0xFFFFF); setReg16(m.reg, off); if(op===0xC4) e.reg.ES=seg; else e.reg.DS=seg; return true; }
 
-    if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const orig=getReg16(r); const v=(orig+1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.PF=calcParity(v); return true; } // INC r16
-    if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const orig=getReg16(r); const v=(orig-1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x8000?1:0; e.flags.PF=calcParity(v); return true; } // DEC r16
-    if (op === 0xFE) { 
-        const m=modrmDec(false); const orig=rmRd(m,false); 
-        if (m.reg===0) { const res=orig+1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x7F?1:0; e.flags.PF=calcParity(res); }
-        else if (m.reg===1) { const res=orig-1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x80?1:0; e.flags.PF=calcParity(res); }
-        return true; 
+    // INC/DEC preserve CF; set OF/AF/SF/ZF/PF.
+    if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const orig=getReg16(r); const v=(orig+1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.AF=computeAF(orig,1,orig+1); e.flags.PF=calcParity(v); return true; } // INC r16
+    if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const orig=getReg16(r); const v=(orig-1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x8000?1:0; e.flags.AF=computeAF(orig,1,orig-1); e.flags.PF=calcParity(v); return true; } // DEC r16
+    if (op === 0xFE) {
+        const m=modrmDec(false); const orig=rmRd(m,false);
+        if (m.reg===0) { const res=orig+1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x7F?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
+        else if (m.reg===1) { const res=orig-1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x80?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
+        return true;
     }
-    if (op === 0xFF) { 
-        const m=modrmDec(true); 
-        if(m.reg===0) { const orig=rmRd(m,true); const res=orig+1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.PF=calcParity(res); }
-        else if(m.reg===1) { const orig=rmRd(m,true); const res=orig-1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x8000?1:0; e.flags.PF=calcParity(res); }
+    if (op === 0xFF) {
+        const m=modrmDec(true);
+        if(m.reg===0) { const orig=rmRd(m,true); const res=orig+1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
+        else if(m.reg===1) { const orig=rmRd(m,true); const res=orig-1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x8000?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
         else if(m.reg===2||m.reg===4){ if(m.reg===2) push16(e, e.reg.IP); e.reg.IP=rmRd(m,true); }
         else if(m.reg===6) push16(e, rmRd(m,true));
         return true;
@@ -465,29 +514,18 @@ const executeBinaryStep = (e, ctx) => {
     if (isALUModRM) {
         const aluOp = (op >> 3) & 7;
         const isWord = (op & 1) === 1;
-        const dir = (op & 2) !== 0; 
-        const signBit = isWord ? 0x8000 : 0x80;
+        const dir = (op & 2) !== 0;
         const m = modrmDec(isWord);
         const rmVal = rmRd(m, isWord);
         const regVal = isWord ? getReg16(m.reg) : getReg8(m.reg);
-        
         const dst = dir ? regVal : rmVal;
         const src = dir ? rmVal : regVal;
-        
-        let res = 0;
-        if (aluOp===0) { res = dst + src; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (src ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===1) { res = dst | src; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===2) { res = dst + src + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (src ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===3) { res = dst - src - e.flags.CF; e.flags.CF = dst < (src + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ src) & (dst ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===4) { res = dst & src; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===5 || aluOp===7) { res = dst - src; e.flags.CF = dst < src ? 1 : 0; e.flags.OF = ((dst ^ src) & (dst ^ res) & signBit) ? 1 : 0; } 
-        else if (aluOp===6) { res = dst ^ src; e.flags.CF = 0; e.flags.OF = 0; }
-        
-        updFlags(res, isWord); e.flags.PF = calcParity(res);
-        
-        if (aluOp !== 7) {
-            if (dir) { if (isWord) setReg16(m.reg, res); else setReg8(m.reg, res); } 
-            else rmWr(m, isWord, res);
+
+        const r = aluCompute(aluOp, dst, src, isWord, e.flags.CF);
+        applyAluFlags(e, r);
+        if (r.write) {
+            if (dir) { if (isWord) setReg16(m.reg, r.res); else setReg8(m.reg, r.res); }
+            else rmWr(m, isWord, r.res);
         }
         return true;
     }
@@ -496,45 +534,27 @@ const executeBinaryStep = (e, ctx) => {
     if (isALUAcc) {
         const aluOp = (op >> 3) & 7;
         const isWord = (op & 1) === 1;
-        const signBit = isWord ? 0x8000 : 0x80;
         const imm = isWord ? fetch16() : fetch8();
         const dst = isWord ? getReg16(0) : getReg8(0);
-        
-        let res = 0;
-        if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
-        
-        updFlags(res, isWord); e.flags.PF = calcParity(res);
-        if (aluOp !== 7) { if (isWord) setReg16(0, res); else setReg8(0, res); }
+
+        const r = aluCompute(aluOp, dst, imm, isWord, e.flags.CF);
+        applyAluFlags(e, r);
+        if (r.write) { if (isWord) setReg16(0, r.res); else setReg8(0, r.res); }
         return true;
     }
 
     if (op >= 0x80 && op <= 0x83) {
         const isWord = op === 0x81 || op === 0x83;
-        const signBit = isWord ? 0x8000 : 0x80;
         const m = modrmDec(isWord);
         let imm = fetch8();
-        if (op === 0x81) { const hi = fetch8(); imm = (hi << 8) | imm; } 
-        else if (op === 0x83) imm = imm << 24 >> 24; 
+        if (op === 0x81) { const hi = fetch8(); imm = (hi << 8) | imm; }
+        else if (op === 0x83) imm = (imm << 24 >> 24) & (isWord ? 0xFFFF : 0xFF); // sign-extend then mask to operand width
         const dst = rmRd(m, isWord);
         const aluOp = m.reg;
-        
-        let res = 0;
-        if (aluOp===0) { res = dst + imm; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===1) { res = dst | imm; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===2) { res = dst + imm + e.flags.CF; e.flags.CF = res > (isWord?0xFFFF:0xFF) ? 1 : 0; e.flags.OF = ((dst ^ res) & (imm ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===3) { res = dst - imm - e.flags.CF; e.flags.CF = dst < (imm + e.flags.CF) ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===4) { res = dst & imm; e.flags.CF = 0; e.flags.OF = 0; }
-        else if (aluOp===5 || aluOp===7) { res = dst - imm; e.flags.CF = dst < imm ? 1 : 0; e.flags.OF = ((dst ^ imm) & (dst ^ res) & signBit) ? 1 : 0; }
-        else if (aluOp===6) { res = dst ^ imm; e.flags.CF = 0; e.flags.OF = 0; }
-        
-        updFlags(res, isWord); e.flags.PF = calcParity(res);
-        if (aluOp !== 7) rmWr(m, isWord, res);
+
+        const r = aluCompute(aluOp, dst, imm, isWord, e.flags.CF);
+        applyAluFlags(e, r);
+        if (r.write) rmWr(m, isWord, r.res);
         return true;
     }
 
@@ -590,13 +610,14 @@ const executeBinaryStep = (e, ctx) => {
         } else if (m.reg === 2) { 
             const v = rmRd(m, isWord);
             rmWr(m, isWord, (~v) & (isWord ? 0xFFFF : 0xFF));
-        } else if (m.reg === 3) { 
+        } else if (m.reg === 3) {
             const signBit = isWord ? 0x8000 : 0x80;
             const v = rmRd(m, isWord);
             const res = (0 - v) & (isWord ? 0xFFFF : 0xFF);
             rmWr(m, isWord, res); updFlags(res, isWord);
             e.flags.CF = v === 0 ? 0 : 1; e.flags.PF = calcParity(res);
             e.flags.OF = v === signBit ? 1 : 0;
+            e.flags.AF = computeAF(0, v, res); // NEG sets AF based on low-nibble borrow
         } else if (m.reg === 4 || m.reg === 5) { 
             const v = rmRd(m, isWord);
             if (isWord) {
@@ -614,28 +635,36 @@ const executeBinaryStep = (e, ctx) => {
                     const sr = ((u1 << 24) >> 24) * ((v << 24) >> 24); e.reg.AX = sr & 0xFFFF; e.flags.CF = e.flags.OF = ((sr & 0x80) ? (sr & 0xFF00) === 0xFF00 : (sr & 0xFF00) === 0) ? 0 : 1;
                 }
             }
-        } else if (m.reg === 6 || m.reg === 7) { 
+        } else if (m.reg === 6 || m.reg === 7) {
             const d = rmRd(m, isWord);
-            if (d === 0) throw new Error("Divide by zero");
+            if (d === 0) { raiseInt(e, 0); return true; } // #DE — divide by zero
             if (isWord) {
                 if (m.reg === 6) {
+                    // Unsigned 32/16 → 16:16
                     const dvnd = (e.reg.DX * 0x10000) + e.reg.AX;
-                    const q = Math.floor(dvnd / d); if (q > 0xFFFF) throw new Error("Divide overflow");
+                    const q = Math.floor(dvnd / d);
+                    if (q > 0xFFFF) { raiseInt(e, 0); return true; }
                     e.reg.AX = q & 0xFFFF; e.reg.DX = dvnd % d;
                 } else {
-                    const dvnd = (e.reg.DX << 16) | e.reg.AX; const ds = (d << 16) >> 16;
-                    const q = Math.trunc(dvnd / ds); if (q > 32767 || q < -32768) throw new Error("Divide overflow");
-                    e.reg.AX = q & 0xFFFF; e.reg.DX = dvnd % ds;
+                    // Signed 32/16 → 16:16 — sign-extend DX:AX properly.
+                    const hi = (e.reg.DX << 16) >> 16; // signed 16
+                    const dvnd = hi * 0x10000 + e.reg.AX;
+                    const ds = (d << 16) >> 16;
+                    const q = Math.trunc(dvnd / ds);
+                    if (q > 32767 || q < -32768) { raiseInt(e, 0); return true; }
+                    e.reg.AX = q & 0xFFFF; e.reg.DX = (dvnd - q * ds) & 0xFFFF;
                 }
             } else {
                 if (m.reg === 6) {
                     const dvnd = e.reg.AX;
-                    const q = Math.floor(dvnd / d); if (q > 0xFF) throw new Error("Divide overflow");
+                    const q = Math.floor(dvnd / d);
+                    if (q > 0xFF) { raiseInt(e, 0); return true; }
                     e.reg.AX = ((dvnd % d) << 8) | (q & 0xFF);
                 } else {
                     const dvnd = (e.reg.AX << 16) >> 16; const ds = (d << 24) >> 24;
-                    const q = Math.trunc(dvnd / ds); if (q > 127 || q < -128) throw new Error("Divide overflow");
-                    e.reg.AX = (((dvnd % ds) & 0xFF) << 8) | (q & 0xFF);
+                    const q = Math.trunc(dvnd / ds);
+                    if (q > 127 || q < -128) { raiseInt(e, 0); return true; }
+                    e.reg.AX = (((dvnd - q * ds) & 0xFF) << 8) | (q & 0xFF);
                 }
             }
         }
@@ -648,6 +677,57 @@ const executeBinaryStep = (e, ctx) => {
     if (op === 0x99) { e.reg.DX = (e.reg.AX & 0x8000) ? 0xFFFF : 0x0000; return true; } 
     if (op === 0x9E) { const ah = (e.reg.AX >> 8) & 0xFF; e.flags.CF=(ah&1)?1:0; e.flags.PF=(ah&4)?1:0; e.flags.AF=(ah&16)?1:0; e.flags.ZF=(ah&64)?1:0; e.flags.SF=(ah&128)?1:0; return true; } // SAHF
     if (op === 0x9F) { let ah=2; if(e.flags.CF)ah|=1; if(e.flags.PF)ah|=4; if(e.flags.AF)ah|=16; if(e.flags.ZF)ah|=64; if(e.flags.SF)ah|=128; e.reg.AX=(e.reg.AX&0xFF)|(ah<<8); return true; } // LAHF
+
+    // BCD adjust instructions — all operate on AL (and AH for unpacked variants).
+    if (op === 0x27) { // DAA — decimal-adjust after add (packed BCD)
+        const oldAL = e.reg.AX & 0xFF; const oldCF = e.flags.CF;
+        let AL = oldAL; let CF = 0;
+        if ((AL & 0x0F) > 9 || e.flags.AF) { const sum = AL + 6; AL = sum & 0xFF; CF = oldCF | (sum > 0xFF ? 1 : 0); e.flags.AF = 1; } else { e.flags.AF = 0; }
+        if (oldAL > 0x99 || oldCF) { AL = (AL + 0x60) & 0xFF; CF = 1; }
+        e.reg.AX = (e.reg.AX & 0xFF00) | AL; e.flags.CF = CF;
+        e.flags.ZF = AL === 0 ? 1 : 0; e.flags.SF = (AL & 0x80) ? 1 : 0; e.flags.PF = calcParity(AL);
+        return true;
+    }
+    if (op === 0x2F) { // DAS — decimal-adjust after sub (packed BCD)
+        const oldAL = e.reg.AX & 0xFF; const oldCF = e.flags.CF;
+        let AL = oldAL; let CF = 0;
+        if ((AL & 0x0F) > 9 || e.flags.AF) { const diff = AL - 6; AL = diff & 0xFF; CF = oldCF | (diff < 0 ? 1 : 0); e.flags.AF = 1; } else { e.flags.AF = 0; }
+        if (oldAL > 0x99 || oldCF) { AL = (AL - 0x60) & 0xFF; CF = 1; }
+        e.reg.AX = (e.reg.AX & 0xFF00) | AL; e.flags.CF = CF;
+        e.flags.ZF = AL === 0 ? 1 : 0; e.flags.SF = (AL & 0x80) ? 1 : 0; e.flags.PF = calcParity(AL);
+        return true;
+    }
+    if (op === 0x37) { // AAA — ASCII-adjust after add (unpacked BCD)
+        let AL = e.reg.AX & 0xFF; let AH = (e.reg.AX >> 8) & 0xFF;
+        if ((AL & 0x0F) > 9 || e.flags.AF) { AL = (AL + 6) & 0xFF; AH = (AH + 1) & 0xFF; e.flags.AF = 1; e.flags.CF = 1; } else { e.flags.AF = 0; e.flags.CF = 0; }
+        AL &= 0x0F;
+        e.reg.AX = (AH << 8) | AL;
+        return true;
+    }
+    if (op === 0x3F) { // AAS — ASCII-adjust after sub (unpacked BCD)
+        let AL = e.reg.AX & 0xFF; let AH = (e.reg.AX >> 8) & 0xFF;
+        if ((AL & 0x0F) > 9 || e.flags.AF) { AL = (AL - 6) & 0xFF; AH = (AH - 1) & 0xFF; e.flags.AF = 1; e.flags.CF = 1; } else { e.flags.AF = 0; e.flags.CF = 0; }
+        AL &= 0x0F;
+        e.reg.AX = (AH << 8) | AL;
+        return true;
+    }
+    if (op === 0xD4) { // AAM — ASCII-adjust after multiply (base in imm8, normally 10)
+        const base = fetch8();
+        if (base === 0) { raiseInt(e, 0); return true; } // divide-by-zero on 8086
+        const AL = e.reg.AX & 0xFF;
+        const AH = Math.floor(AL / base); const newAL = AL % base;
+        e.reg.AX = (AH << 8) | newAL;
+        e.flags.ZF = newAL === 0 ? 1 : 0; e.flags.SF = (newAL & 0x80) ? 1 : 0; e.flags.PF = calcParity(newAL);
+        return true;
+    }
+    if (op === 0xD5) { // AAD — ASCII-adjust before divide (base in imm8, normally 10)
+        const base = fetch8();
+        const AL = e.reg.AX & 0xFF; const AH = (e.reg.AX >> 8) & 0xFF;
+        const newAL = (AH * base + AL) & 0xFF;
+        e.reg.AX = newAL;
+        e.flags.ZF = newAL === 0 ? 1 : 0; e.flags.SF = (newAL & 0x80) ? 1 : 0; e.flags.PF = calcParity(newAL);
+        return true;
+    }
     if (op === 0xD7) { const phys = calcPhys(segOv !== null ? segOv : e.reg.DS, (e.reg.BX + (e.reg.AX & 0xFF)) & 0xFFFF); e.reg.AX = (e.reg.AX & 0xFF00) | readMem8(e, phys); return true; } // XLAT
 
     if (op === 0xE4 || op === 0xE5) {
@@ -685,21 +765,40 @@ const executeBinaryStep = (e, ctx) => {
 
         if (count > 0) {
             let val = rmRd(m, isWord);
+            const origVal = val;
             const msbMask = isWord ? 0x8000 : 0x80;
+            const nextMsbMask = isWord ? 0x4000 : 0x40;
             const maxVal = isWord ? 0xFFFF : 0xFF;
             const shiftAmt = isWord ? 15 : 7;
 
             for (let i = 0; i < count; i++) {
                 const msb = (val & msbMask) !== 0; const lsb = (val & 1) !== 0;
-                if (m.reg === 0) { e.flags.CF = msb ? 1 : 0; val = ((val << 1) | e.flags.CF) & maxVal; } 
-                else if (m.reg === 1) { e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (e.flags.CF << shiftAmt)) & maxVal; } 
-                else if (m.reg === 2) { const oldCF = e.flags.CF; e.flags.CF = msb ? 1 : 0; val = ((val << 1) | oldCF) & maxVal; } 
-                else if (m.reg === 3) { const oldCF = e.flags.CF; e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (oldCF << shiftAmt)) & maxVal; } 
-                else if (m.reg === 4 || m.reg === 6) { e.flags.CF = msb ? 1 : 0; val = (val << 1) & maxVal; } 
-                else if (m.reg === 5) { e.flags.CF = lsb ? 1 : 0; val = (val >> 1) & maxVal; } 
+                if (m.reg === 0) { e.flags.CF = msb ? 1 : 0; val = ((val << 1) | e.flags.CF) & maxVal; }
+                else if (m.reg === 1) { e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (e.flags.CF << shiftAmt)) & maxVal; }
+                else if (m.reg === 2) { const oldCF = e.flags.CF; e.flags.CF = msb ? 1 : 0; val = ((val << 1) | oldCF) & maxVal; }
+                else if (m.reg === 3) { const oldCF = e.flags.CF; e.flags.CF = lsb ? 1 : 0; val = ((val >> 1) | (oldCF << shiftAmt)) & maxVal; }
+                else if (m.reg === 4 || m.reg === 6) { e.flags.CF = msb ? 1 : 0; val = (val << 1) & maxVal; }
+                else if (m.reg === 5) { e.flags.CF = lsb ? 1 : 0; val = (val >> 1) & maxVal; }
                 else if (m.reg === 7) { e.flags.CF = lsb ? 1 : 0; val = (val & msbMask) | ((val >> 1) & (maxVal >> 1)); }
             }
-            rmWr(m, isWord, val); updFlags(val, isWord); e.flags.PF = calcParity(val);
+            rmWr(m, isWord, val);
+            // SHL/SHR/SAR (m.reg 4–7) affect ZF/SF/PF; rotates (0–3) leave them alone.
+            if (m.reg >= 4) { updFlags(val, isWord); e.flags.PF = calcParity(val); }
+
+            // OF is defined only when count == 1. For count > 1 the 8086 leaves OF undefined; we leave it alone.
+            if (count === 1) {
+                const newMsb = (val & msbMask) ? 1 : 0;
+                if (m.reg === 0 || m.reg === 2 || m.reg === 4 || m.reg === 6) {
+                    e.flags.OF = newMsb ^ e.flags.CF;                       // ROL / RCL / SHL / SAL
+                } else if (m.reg === 1 || m.reg === 3) {
+                    const nextMsb = (val & nextMsbMask) ? 1 : 0;
+                    e.flags.OF = newMsb ^ nextMsb;                          // ROR / RCR
+                } else if (m.reg === 5) {
+                    e.flags.OF = (origVal & msbMask) ? 1 : 0;               // SHR — old MSB
+                } else if (m.reg === 7) {
+                    e.flags.OF = 0;                                         // SAR — sign bit cannot change
+                }
+            }
         }
         return true;
     }
@@ -785,8 +884,8 @@ const executeBinaryStep = (e, ctx) => {
                     v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
                 }
                 e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
-                const res = v1 - v2;
-                updFlags(res, isWord); e.flags.CF = v1 < v2 ? 1 : 0; e.flags.PF = calcParity(res);
+                // CMPS/SCAS: full SUB-style flag set (ZF/SF/PF/CF/OF/AF).
+                applyAluFlags(e, aluCompute(7, v1, v2, isWord, 0));
             }
         };
 
@@ -803,7 +902,12 @@ const executeBinaryStep = (e, ctx) => {
         return true;
     }
 
-    throw new Error(`X86 BINARY ERROR: Unsupported Opcode 0x${op.toString(16).toUpperCase()} at ${toHex(e.reg.CS)}:${toHex(opIP)}`);
+    // Undefined opcode — rewind IP to the start of the faulting instruction and dispatch INT 6
+    // (the 8086 itself didn't have #UD, but raising INT 6 lets a guest handle invalid opcodes
+    // gracefully instead of aborting the emulator).
+    e.reg.IP = opIP;
+    raiseInt(e, 6);
+    return true;
 };
 
 /**
