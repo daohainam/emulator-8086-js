@@ -7,6 +7,9 @@
  * TIMES with any instruction, sign-extended immediates.
  */
 
+const MAX_ASSEMBLY_ATTEMPTS = 5;
+const NOP_OPCODE = 0x90;
+
 const REGISTERS = {
     AL: { name: 'AL', size: 8, code: 0 }, CL: { name: 'CL', size: 8, code: 1 },
     DL: { name: 'DL', size: 8, code: 2 }, BL: { name: 'BL', size: 8, code: 3 },
@@ -318,7 +321,7 @@ class Assembler8086 {
         const preprocessed = this.preprocess(sourceCode);
         
         // Try assembly with short jumps first; auto-upgrade to near if needed
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < MAX_ASSEMBLY_ATTEMPTS; attempt++) {
             this.symbolTable.clear();
             this.lines = [];
             this.currentGlobalLabel = '';
@@ -502,7 +505,7 @@ class Assembler8086 {
                 if (isNaN(alignment) || alignment <= 0) throw new Error(`[Line ${i+1}] Invalid ALIGN value: ${rest}`);
                 const padding = (alignment - (currentAddress % alignment)) % alignment;
                 if (padding > 0) {
-                    const padBytes = new Array(padding).fill(0x90); // NOP padding
+                    const padBytes = new Array(padding).fill(NOP_OPCODE); // NOP padding
                     const parsedLine = { original: rawLines[i], label, mnemonic: 'ALIGN', operands: [], offset: currentAddress };
                     parsedLine.rule = { match: [], size: () => padBytes.length, encode: () => padBytes };
                     currentAddress += padBytes.length;
