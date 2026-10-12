@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# SingleStepTests data (user-downloaded, untrusted)
+test/data/

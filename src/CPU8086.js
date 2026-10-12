@@ -7,11 +7,7 @@ const ADDR_SPACE     = 1048576; // Total address space (1 MB)
 const DISK_SIZE      = 131072;  // Virtual disk size (128 KB)
 const SECTOR_SIZE    = 512;     // Standard disk sector size
 
-// --- FLOPPY CONSTANTS (3.5" 1.44 MB) ---
-const FLOPPY_SIZE              = 1474560; // 1.44 MB (2880 sectors × 512 bytes)
-const FLOPPY_HEADS             = 2;
-const FLOPPY_SECTORS_PER_TRACK = 18;
-const FLOPPY_CYLINDERS         = 80;
+const FLOPPY_SIZE    = 1474560; // 3.5" 1.44 MB floppy image (2880 sectors × 512 bytes); geometry lives in bios/int13.js
 
 const VGA_BASE       = 0xB8000; // VGA text mode VRAM base address
 const VGA_COLS       = 80;      // VGA text mode columns
@@ -35,28 +31,61 @@ const calcParity = (val) => PARITY_TABLE[val & 0xFF];
 // ===============================================
 // CORE: MEMORY MANAGER
 // ===============================================
+// The BIOS ROM occupies F000:0000-FFFF. Guest (CPU) writes there are ignored like on real ROM;
+// host-side loads and edits use writeMem8Safe, which bypasses the protection.
+const ROM_BASE = 0xF0000;
+
 const readMem8 = (e, phys) => e.mem[phys];
-const writeMem8 = (e, phys, val) => { e.mem[phys] = val & 0xFF; };
+const writeMem8 = (e, phys, val) => { if (phys < ROM_BASE) e.mem[phys] = val & 0xFF; };
 const writeMem8Safe = (e, phys, val) => { if (phys < ADDR_SPACE) e.mem[phys] = val & 0xFF; };
 
-const readMemWord = (e, phys) => readMem8(e, phys) | (readMem8(e, phys + 1) << 8);
-const writeMemWord = (e, phys, val) => { writeMem8(e, phys, val & 0xFF); writeMem8(e, phys + 1, (val >> 8) & 0xFF); };
-const push16 = (e, val) => { e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeMemWord(e, calcPhys(e.reg.SS, e.reg.SP), val); };
-const pop16 = (e) => { const val = readMemWord(e, calcPhys(e.reg.SS, e.reg.SP)); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
+// Word access by physical address (IVT, BDA, host-side code). The high byte wraps at the 1 MB boundary.
+const readMemWord = (e, phys) => readMem8(e, phys) | (readMem8(e, (phys + 1) & (ADDR_SPACE - 1)) << 8);
+const writeMemWord = (e, phys, val) => { writeMem8(e, phys, val & 0xFF); writeMem8(e, (phys + 1) & (ADDR_SPACE - 1), (val >> 8) & 0xFF); };
 
+// Word access by segment:offset. The high byte lives at offset+1 *inside the same segment* (wraps at 64 KB).
+const readWordSeg = (e, seg, off) => readMem8(e, calcPhys(seg, off)) | (readMem8(e, calcPhys(seg, off + 1)) << 8);
+const writeWordSeg = (e, seg, off, val) => { writeMem8(e, calcPhys(seg, off), val & 0xFF); writeMem8(e, calcPhys(seg, off + 1), (val >> 8) & 0xFF); };
+
+const push16 = (e, val) => { e.reg.SP = (e.reg.SP - 2) & 0xFFFF; writeWordSeg(e, e.reg.SS, e.reg.SP, val); };
+const pop16 = (e) => { const val = readWordSeg(e, e.reg.SS, e.reg.SP); e.reg.SP = (e.reg.SP + 2) & 0xFFFF; return val; };
+
+// FLAGS image as seen by PUSHF on an 8086/80186: bit 1 and bits 12-15 always read as 1.
+const FLAGS_FIXED_BITS = 0xF002;
 const packFlags = (e) => {
-    const f = e.flags; let r = 0;
+    const f = e.flags; let r = FLAGS_FIXED_BITS;
     if (f.CF) r |= (1<<0); if (f.PF) r |= (1<<2); if (f.AF) r |= (1<<4);
-    if (f.ZF) r |= (1<<6); if (f.SF) r |= (1<<7); if (f.IF) r |= (1<<9);
+    if (f.ZF) r |= (1<<6); if (f.SF) r |= (1<<7); if (f.TF) r |= (1<<8); if (f.IF) r |= (1<<9);
     if (f.DF) r |= (1<<10); if (f.OF) r |= (1<<11);
     return r;
 };
 const unpackFlags = (e, r) => {
     const f = e.flags;
     f.CF = (r & (1<<0)) ? 1 : 0; f.PF = (r & (1<<2)) ? 1 : 0; f.AF = (r & (1<<4)) ? 1 : 0;
-    f.ZF = (r & (1<<6)) ? 1 : 0; f.SF = (r & (1<<7)) ? 1 : 0; f.IF = (r & (1<<9)) ? 1 : 0;
+    f.ZF = (r & (1<<6)) ? 1 : 0; f.SF = (r & (1<<7)) ? 1 : 0; f.TF = (r & (1<<8)) ? 1 : 0; f.IF = (r & (1<<9)) ? 1 : 0;
     f.DF = (r & (1<<10)) ? 1 : 0; f.OF = (r & (1<<11)) ? 1 : 0;
 };
+
+/**
+ * Fresh CPU engine state. `cpuModel` selects the instruction set: '8086' (strict, default) or '186' (opt-in).
+ *  - halted:     CPU is idle after HLT, waiting for an interrupt
+ *  - inhibitIRQ: set by STI / MOV SS / POP SS; suppresses IRQ delivery after the *next* step only
+ *  - hle:        host callbacks (index -> fn(e, ctx)) invoked by the BIOS stubs
+ */
+const createEngine = (over = {}) => ({
+    reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: 0xFFFE, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
+    flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0, TF: 0 },
+    mem: new Uint8Array(ADDR_SPACE),
+    disk: new Uint8Array(DISK_SIZE),
+    floppy: new Uint8Array(FLOPPY_SIZE),
+    cursorX: 0,
+    cursorY: 0,
+    cpuModel: '8086',
+    halted: false,
+    inhibitIRQ: false,
+    hle: [],
+    ...over,
+});
 
 // AF (auxiliary/half-carry) flag — set when carry/borrow crosses the low nibble.
 const computeAF = (dst, src, res) => ((dst ^ src ^ res) & 0x10) ? 1 : 0;
@@ -84,299 +113,15 @@ const applyAluFlags = (e, r) => {
     e.flags.ZF = r.ZF; e.flags.SF = r.SF; e.flags.PF = r.PF;
 };
 
-// Raise a CPU interrupt: push flags, clear IF, push CS:IP, jump through IVT[vector].
+// Raise a CPU interrupt: push flags, clear IF and TF, push CS:IP, jump through IVT[vector].
 const raiseInt = (e, vector) => {
     push16(e, packFlags(e));
     e.flags.IF = 0;
+    e.flags.TF = 0;
     push16(e, e.reg.CS);
     push16(e, e.reg.IP);
     e.reg.IP = readMemWord(e, calcPhys(0, vector * 4));
     e.reg.CS = readMemWord(e, calcPhys(0, vector * 4 + 2));
-};
-
-// ===============================================
-// BIOS INTERRUPT HANDLERS
-// ===============================================
-
-const handleInt10 = (e) => {
-    const ax = e.reg.AX; const bx = e.reg.BX; const cx = e.reg.CX; const dx = e.reg.DX;
-    const ah = (ax >> 8) & 0xFF; const al = ax & 0xFF;
-    const bh = (bx >> 8) & 0xFF; const bl = bx & 0xFF;
-    const ch = (cx >> 8) & 0xFF; const cl = cx & 0xFF;
-    const dh = (dx >> 8) & 0xFF; const dl = dx & 0xFF;
-
-    const scrollUp = (lines, attr, r1, c1, r2, c2) => {
-        attr = attr || 0x07;
-        if (lines === 0) { 
-            for (let r = r1; r <= r2; r++) {
-                for (let c = c1; c <= c2; c++) {
-                    const idx = VGA_BASE + (r * 80 + c) * 2;
-                    e.mem[idx] = 0; e.mem[idx + 1] = attr;
-                }
-            }
-        } else {
-            for (let r = r1; r <= r2 - lines; r++) {
-                for (let c = c1; c <= c2; c++) {
-                    const dest = VGA_BASE + (r * 80 + c) * 2;
-                    const src = VGA_BASE + ((r + lines) * 80 + c) * 2;
-                    e.mem[dest] = e.mem[src]; e.mem[dest + 1] = e.mem[src + 1];
-                }
-            }
-            for (let r = r2 - lines + 1; r <= r2; r++) {
-                for (let c = c1; c <= c2; c++) {
-                    const idx = VGA_BASE + (r * 80 + c) * 2;
-                    e.mem[idx] = 0; e.mem[idx + 1] = attr;
-                }
-            }
-        }
-    };
-
-    if (ah === 0x00) { 
-        for (let i = 0; i < VGA_SIZE; i += 2) { e.mem[VGA_BASE + i] = 0; e.mem[VGA_BASE + i + 1] = 0x07; }
-        e.cursorX = 0; e.cursorY = 0;
-    } else if (ah === 0x02) { 
-        e.cursorY = Math.min(dh, 24);
-        e.cursorX = Math.min(dl, 79);
-    } else if (ah === 0x06) { 
-        scrollUp(al, bh, ch, cl, dh, dl);
-    } else if (ah === 0x09) { 
-        let cX = e.cursorX; let cY = e.cursorY;
-        for(let i = 0; i < cx; i++) {
-            const idx = VGA_BASE + (cY * 80 + cX) * 2;
-            e.mem[idx] = al; e.mem[idx+1] = bl;
-            cX++; if (cX >= 80) { cX = 0; cY++; }
-            if (cY >= 25) break; 
-        }
-    } else if (ah === 0x0E) { 
-        if (al === 13) { e.cursorX = 0; } 
-        else if (al === 10) { e.cursorY++; } 
-        else if (al === 8) { if (e.cursorX > 0) e.cursorX--; } 
-        else {
-            const idx = VGA_BASE + (e.cursorY * 80 + e.cursorX) * 2;
-            e.mem[idx] = al; e.mem[idx + 1] = 0x07;
-            e.cursorX++;
-        }
-        if (e.cursorX >= 80) { e.cursorX = 0; e.cursorY++; }
-        if (e.cursorY >= 25) { scrollUp(1, 0x07, 0, 0, 24, 79); e.cursorY = 24; }
-    }
-};
-
-// INT 13h handler for first floppy disk (DL=0x00)
-const handleFloppyInt13 = (e, ah, al) => {
-    if (ah === 0x00) {
-        // Reset — return success
-        e.reg.AX &= 0x00FF;
-        e.flags.CF = 0;
-    } else if (ah === 0x01) {
-        // Get status — return success
-        e.reg.AX &= 0x00FF;
-        e.flags.CF = 0;
-    } else if (ah === 0x02 || ah === 0x03) {
-        // Read (02h) / Write (03h) sectors
-        const isRead = (ah === 0x02);
-        const count = al;
-        const cl = e.reg.CX & 0xFF;
-        const ch = (e.reg.CX >> 8) & 0xFF;
-        const sector   = cl & 0x3F;                   // bits 0-5 of CL (1-based)
-        const cylinder = ch | ((cl & 0xC0) << 2);     // CH + bits 6-7 of CL
-        const head     = (e.reg.DX >> 8) & 0xFF;      // DH
-
-        const lba    = (cylinder * FLOPPY_HEADS + head) * FLOPPY_SECTORS_PER_TRACK + (sector - 1);
-        const offset = lba * SECTOR_SIZE;
-
-        if (sector === 0 || offset < 0 || offset + count * SECTOR_SIZE > FLOPPY_SIZE) {
-            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 sector not found
-            e.flags.CF = 1;
-            return;
-        }
-
-        const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
-        for (let i = 0; i < count * SECTOR_SIZE; i++) {
-            if (isRead) {
-                writeMem8Safe(e, (bufAddr + i) & (ADDR_SPACE - 1), e.floppy[offset + i]);
-            } else {
-                e.floppy[offset + i] = readMem8(e, (bufAddr + i) & (ADDR_SPACE - 1));
-            }
-        }
-        e.reg.AX &= 0x00FF; // AH=0 success, AL preserved (sectors transferred)
-        e.flags.CF = 0;
-    } else if (ah === 0x08) {
-        // Get drive parameters — 3.5" 1.44 MB
-        e.reg.AX = 0x0000;
-        e.reg.BX = 0x0004; // drive type 04h = 3.5" 1.44 MB
-        e.reg.CX = ((FLOPPY_CYLINDERS - 1) << 8) | FLOPPY_SECTORS_PER_TRACK;
-        e.reg.DX = ((FLOPPY_HEADS - 1) << 8) | 0x01; // DH=max head, DL=1 drive
-        e.flags.CF = 0;
-    } else if (ah === 0x15) {
-        // Get disk type — floppy with change-line support
-        const total = FLOPPY_SIZE / SECTOR_SIZE; // 2880
-        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0200; // AH=02 floppy w/ change-line
-        e.reg.CX = (total >> 16) & 0xFFFF;
-        e.reg.DX = total & 0xFFFF;
-        e.flags.CF = 0;
-    } else {
-        // Other subfunctions — return success
-        e.reg.AX &= 0x00FF;
-        e.flags.CF = 0;
-    }
-};
-
-const handleInt13 = (e) => {
-    const ah = (e.reg.AX >> 8) & 0xFF;
-    const al = e.reg.AX & 0xFF;
-    const dl = e.reg.DX & 0xFF;
-
-    // Dispatch on drive number
-    if (dl === 0x00) {
-        // First floppy disk (A:)
-        handleFloppyInt13(e, ah, al);
-        return;
-    } else if (dl !== 0x80) {
-        // Unsupported drive
-        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0100; // AH=01 (invalid parameter)
-        e.flags.CF = 1;
-        return;
-    }
-
-    const TOTAL_SECTORS = Math.floor(DISK_SIZE / SECTOR_SIZE); // 128 sectors
-    // CHS geometry: 1 head, 1 track per head, TOTAL_SECTORS sectors/track (simplified flat)
-    const HEADS = 1;
-    const SECTORS_PER_TRACK = 63; // standard max
-    const CYLINDERS = Math.ceil(TOTAL_SECTORS / (HEADS * SECTORS_PER_TRACK));
-
-    if (ah === 0x00) {
-        // Reset disk system — return success
-        e.reg.AX = (e.reg.AX & 0x00FF); // AH=0 (success)
-        e.flags.CF = 0;
-    } else if (ah === 0x01) {
-        // Get status of last operation — return success
-        e.reg.AX = (e.reg.AX & 0x00FF); // AH=0 (success)
-        e.flags.CF = 0;
-    } else if (ah === 0x02) {
-        // Read sectors: AL=count, CH=cyl, CL=sector(1-based), DH=head, ES:BX=buffer
-        const count = al;
-        const cl = e.reg.CX & 0xFF;
-        const ch = (e.reg.CX >> 8) & 0xFF;
-        const dh = (e.reg.DX >> 8) & 0xFF;
-        const sector = (cl & 0x3F);           // bits 0-5 of CL
-        const cylinder = ch | ((cl & 0xC0) << 2); // CH + bits 6-7 of CL
-        const head = dh;
-
-        const lba = (cylinder * HEADS + head) * SECTORS_PER_TRACK + (sector - 1);
-        const diskOffset = lba * SECTOR_SIZE;
-
-        if (sector === 0 || diskOffset < 0 || diskOffset + count * SECTOR_SIZE > DISK_SIZE) {
-            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 (sector not found)
-            e.flags.CF = 1;
-            return;
-        }
-
-        const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
-        for (let i = 0; i < count * SECTOR_SIZE; i++) {
-            writeMem8Safe(e, (bufAddr + i) & (ADDR_SPACE - 1), e.disk[diskOffset + i]);
-        }
-        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0000; // AH=0 (success), AL preserved as sectors read
-        e.flags.CF = 0;
-    } else if (ah === 0x03) {
-        // Write sectors: AL=count, CH=cyl, CL=sector(1-based), DH=head, ES:BX=buffer
-        const count = al;
-        const cl = e.reg.CX & 0xFF;
-        const ch = (e.reg.CX >> 8) & 0xFF;
-        const dh = (e.reg.DX >> 8) & 0xFF;
-        const sector = (cl & 0x3F);
-        const cylinder = ch | ((cl & 0xC0) << 2);
-        const head = dh;
-
-        const lba = (cylinder * HEADS + head) * SECTORS_PER_TRACK + (sector - 1);
-        const diskOffset = lba * SECTOR_SIZE;
-
-        if (sector === 0 || diskOffset < 0 || diskOffset + count * SECTOR_SIZE > DISK_SIZE) {
-            e.reg.AX = (e.reg.AX & 0x00FF) | 0x0400; // AH=04 (sector not found)
-            e.flags.CF = 1;
-            return;
-        }
-
-        const bufAddr = calcPhys(e.reg.ES, e.reg.BX);
-        for (let i = 0; i < count * SECTOR_SIZE; i++) {
-            e.disk[diskOffset + i] = readMem8(e, (bufAddr + i) & (ADDR_SPACE - 1));
-        }
-        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0000; // AH=0 (success)
-        e.flags.CF = 0;
-    } else if (ah === 0x08) {
-        // Get drive parameters
-        e.reg.AX = 0x0000; // AH=0 success
-        e.reg.BX = 0x0000;
-        e.reg.CX = ((CYLINDERS - 1) << 8) | SECTORS_PER_TRACK; // CH=max cyl, CL=max sector
-        e.reg.DX = ((HEADS - 1) << 8) | 0x01; // DH=max head, DL=number of drives
-        e.flags.CF = 0;
-    } else if (ah === 0x15) {
-        // Get disk type
-        e.reg.AX = (e.reg.AX & 0x00FF) | 0x0300; // AH=03 (hard disk present)
-        e.reg.CX = (TOTAL_SECTORS >> 16) & 0xFFFF;
-        e.reg.DX = TOTAL_SECTORS & 0xFFFF;
-        e.flags.CF = 0;
-    } else {
-        // Other functions — return success
-        e.reg.AX = (e.reg.AX & 0x00FF); // AH=0
-        e.flags.CF = 0;
-    }
-};
-
-/**
- * JS fallback handler for INT 0x16 when no BIOS ROM is loaded.
- * Reads from the BDA keyboard circular buffer in memory (same layout that
- * the ASM int16_handler in int16.asm uses) so both paths are consistent.
- *
- * BDA layout (segment 0x0040, physical base 0x0400):
- *   0x0417 (phys) = BDA_KBD_STATUS1 — shift/toggle flags
- *   0x041A (phys) = BDA_KBD_HEAD    — head pointer (BDA-relative offset)
- *   0x041C (phys) = BDA_KBD_TAIL    — tail pointer (BDA-relative offset)
- *   0x041E (phys) = start of 32-byte circular buffer (BDA offset 0x1E)
- *   0x043E (phys) = one past end of buffer (BDA offset 0x3E)
- *
- * Entry word: low byte = ASCII code, high byte = scan code.
- * Buffer empty when head == tail.
- *
- * @param {object} e - CPU engine state
- */
-const handleInt16 = (e) => {
-    const BDA_BASE     = 0x0400;  // physical base of BDA segment
-    const HEAD_PHYS    = 0x041A;
-    const TAIL_PHYS    = 0x041C;
-    const STATUS1_PHYS = 0x0417;
-    const BUF_OFF_START = 0x1E;
-    const BUF_OFF_END   = 0x3E;
-
-    const ah = (e.reg.AX >> 8) & 0xFF;
-
-    if (ah === 0x00 || ah === 0x10) {
-        // Blocking read: re-execute INT 16h until a key is available
-        const head = readMemWord(e, HEAD_PHYS);
-        const tail = readMemWord(e, TAIL_PHYS);
-        if (head === tail) {
-            e.reg.IP = (e.reg.IP - 2) & 0xFFFF; // back up to re-execute
-            return;
-        }
-        e.reg.AX = readMemWord(e, BDA_BASE + head);
-        const nextHead = (head + 2 >= BUF_OFF_END) ? BUF_OFF_START : head + 2;
-        writeMemWord(e, HEAD_PHYS, nextHead);
-    } else if (ah === 0x01 || ah === 0x11) {
-        // Non-destructive peek
-        const head = readMemWord(e, HEAD_PHYS);
-        const tail = readMemWord(e, TAIL_PHYS);
-        if (head === tail) {
-            e.flags.ZF = 1;
-        } else {
-            e.flags.ZF = 0;
-            e.reg.AX = readMemWord(e, BDA_BASE + head);
-        }
-    } else if (ah === 0x02) {
-        // Get shift status byte 1
-        e.reg.AX = (e.reg.AX & 0xFF00) | readMem8(e, STATUS1_PHYS);
-    } else if (ah === 0x12) {
-        // Extended shift status: AL = status1, AH = status2
-        e.reg.AX = ((readMem8(e, STATUS1_PHYS + 1)) << 8) | readMem8(e, STATUS1_PHYS);
-    }
 };
 
 // ===============================================
@@ -389,9 +134,13 @@ const handleInt16 = (e) => {
  * @param {object} ctx - External context: { bus, keyboard, shiftState, pic }
  * @returns {boolean} true to continue, false to halt
  */
+const SEG_REG_NAMES = ["ES", "CS", "SS", "DS"];
+const PREFIX_OPS = new Set([0x26, 0x2E, 0x36, 0x3E, 0xF0, 0xF2, 0xF3]);
+
 const executeBinaryStep = (e, ctx) => {
-    let opIP = e.reg.IP;
-    
+    const is186 = e.cpuModel === '186';
+    const opIP = e.reg.IP;
+
     const fetch8 = () => {
         const v = readMem8(e, calcPhys(e.reg.CS, e.reg.IP));
         e.reg.IP = (e.reg.IP + 1) & 0xFFFF;
@@ -415,32 +164,44 @@ const executeBinaryStep = (e, ctx) => {
     let repPrefix = 0;
     let op = fetch8();
     // 0xF0 (LOCK) is consumed but has no semantic effect in single-CPU emulation.
-    while ([0x26, 0x2E, 0x36, 0x3E, 0xF0, 0xF2, 0xF3].includes(op)) {
+    // On the 8086 0xF1 is an undocumented alias of LOCK.
+    while (PREFIX_OPS.has(op) || (op === 0xF1 && !is186)) {
         if (op===0x26) segOv=e.reg.ES; if (op===0x2E) segOv=e.reg.CS;
         if (op===0x36) segOv=e.reg.SS; if (op===0x3E) segOv=e.reg.DS;
         if (op===0xF2 || op===0xF3) repPrefix = op;
         op = fetch8();
     }
 
-    const modrmDec = (isWord) => {
+    // Undocumented 8086 aliases: the 186 decodes these opcodes as real instructions,
+    // the 8086 shares the decode logic with their neighbours.
+    if (!is186) {
+        if (op >= 0x60 && op <= 0x6F) op += 0x10;                                      // 60-6F -> Jcc 70-7F
+        else if (op === 0xC0 || op === 0xC1 || op === 0xC8 || op === 0xC9) op += 2;    // -> RET / RETF
+    }
+
+    // Decode a ModRM byte (plus displacement). Memory operands are returned as seg:ea so word
+    // accesses can wrap inside the segment; register operands have mod === 3.
+    const modrmDec = () => {
         const b = fetch8();
         const mod = b>>6; const reg = (b>>3)&7; const rm = b&7;
-        let addr = -1; let ds = e.reg.DS;
+        let seg = e.reg.DS;
         let ea = 0;
         if (mod !== 3) {
             if(rm===0)ea=e.reg.BX+e.reg.SI; else if(rm===1)ea=e.reg.BX+e.reg.DI;
-            else if(rm===2){ea=e.reg.BP+e.reg.SI;ds=e.reg.SS;} else if(rm===3){ea=e.reg.BP+e.reg.DI;ds=e.reg.SS;}
+            else if(rm===2){ea=e.reg.BP+e.reg.SI;seg=e.reg.SS;} else if(rm===3){ea=e.reg.BP+e.reg.DI;seg=e.reg.SS;}
             else if(rm===4)ea=e.reg.SI; else if(rm===5)ea=e.reg.DI;
-            else if(rm===6){if(mod===0)ea=fetch16();else{ea=e.reg.BP;ds=e.reg.SS;}}
+            else if(rm===6){if(mod===0)ea=fetch16();else{ea=e.reg.BP;seg=e.reg.SS;}}
             else if(rm===7)ea=e.reg.BX;
             if(mod===1)ea+=(fetch8()<<24>>24); else if(mod===2)ea+=fetch16();
             ea = ea & 0xFFFF;
-            addr = calcPhys(segOv !== null ? segOv : ds, ea);
+            if (segOv !== null) seg = segOv;
         }
-        return {mod, reg, rm, addr, ea};
+        return {mod, reg, rm, seg, ea};
     };
-    const rmRd = (m, w) => m.mod===3 ? (w?getReg16(m.rm):getReg8(m.rm)) : (w?readMemWord(e, m.addr):readMem8(e, m.addr));
-    const rmWr = (m, w, v) => { if(m.mod===3) {if(w)setReg16(m.rm,v);else setReg8(m.rm,v);} else {if(w)writeMemWord(e, m.addr,v);else writeMem8(e, m.addr,v);} };
+    const rmRd = (m, w) => m.mod===3 ? (w?getReg16(m.rm):getReg8(m.rm)) : (w?readWordSeg(e, m.seg, m.ea):readMem8(e, calcPhys(m.seg, m.ea)));
+    const rmWr = (m, w, v) => { if(m.mod===3) {if(w)setReg16(m.rm,v);else setReg8(m.rm,v);} else {if(w)writeWordSeg(e, m.seg, m.ea, v);else writeMem8(e, calcPhys(m.seg, m.ea), v);} };
+    // Undefined encoding: the 186 raises INT 6 at the faulting instruction; the 8086 has no such trap.
+    const undefinedOp = () => { if (is186) { e.reg.IP = opIP; raiseInt(e, 6); } return true; };
 
     const updFlags = (r, isWord) => {
         e.flags.ZF = (r & (isWord?0xFFFF:0xFF)) === 0 ? 1 : 0;
@@ -449,14 +210,21 @@ const executeBinaryStep = (e, ctx) => {
 
     if (op === 0x90) return true;       // NOP
     if (op === 0x9B) return true;       // WAIT — no FPU, treat as NOP
-    if (op === 0xF4) return false;      // HLT
+    if (op === 0xF4) {                  // HLT
+        // Idle until an interrupt when one can actually arrive; otherwise nothing can wake the CPU, so stop.
+        const pic = ctx && ctx.pic;
+        const canWake = e.flags.IF && pic && ((~pic.imr) & 0xFF) !== 0;
+        if (!canWake) return false;
+        e.halted = true;
+        return true;
+    }
 
     // INT 3 (one-byte breakpoint) and INTO (interrupt-if-overflow) — raise IVT-dispatched interrupts.
     if (op === 0xCC) { raiseInt(e, 3); return true; }
     if (op === 0xCE) { if (e.flags.OF) raiseInt(e, 4); return true; }
     
     if (op === 0xFA) { e.flags.IF = 0; return true; } // CLI
-    if (op === 0xFB) { e.flags.IF = 1; return true; } // STI
+    if (op === 0xFB) { e.flags.IF = 1; e.inhibitIRQ = true; return true; } // STI — IRQs are recognised after the next instruction
     if (op === 0xF8) { e.flags.CF = 0; return true; } // CLC
     if (op === 0xF9) { e.flags.CF = 1; return true; } // STC
     if (op === 0xFC) { e.flags.DF = 0; return true; } // CLD
@@ -466,46 +234,136 @@ const executeBinaryStep = (e, ctx) => {
     if (op >= 0xB8 && op <= 0xBF) { setReg16(op-0xB8, fetch16()); return true; } // MOV r16, imm16
     if (op >= 0xB0 && op <= 0xB7) { setReg8(op-0xB0, fetch8()); return true; } // MOV r8, imm8
     
-    if (op === 0x8E) { const m = modrmDec(true); e.reg[["ES","CS","SS","DS"][m.reg]] = rmRd(m, true); return true; } // MOV Sreg, r/m
-    if (op === 0x8C) { const m = modrmDec(true); rmWr(m, true, e.reg[["ES","CS","SS","DS"][m.reg]]); return true; } // MOV r/m, Sreg
-    if (op === 0x8B) { const m = modrmDec(true); setReg16(m.reg, rmRd(m, true)); return true; } // MOV r16, r/m16
-    if (op === 0x8A) { const m = modrmDec(false); setReg8(m.reg, rmRd(m, false)); return true; } // MOV r8, r/m8
-    if (op === 0x89) { const m = modrmDec(true); rmWr(m, true, getReg16(m.reg)); return true; } // MOV r/m16, r16
-    if (op === 0x88) { const m = modrmDec(false); rmWr(m, false, getReg8(m.reg)); return true; } // MOV r/m8, r8
-    if (op === 0xC7) { const m = modrmDec(true); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
-    if (op === 0xC6) { const m = modrmDec(false); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
-    if (op === 0xC4 || op === 0xC5) { const m = modrmDec(true); if (m.mod===3) throw new Error("LDS/LES needs mem"); const off=readMemWord(e, m.addr); const seg=readMemWord(e, (m.addr+2)&0xFFFFF); setReg16(m.reg, off); if(op===0xC4) e.reg.ES=seg; else e.reg.DS=seg; return true; }
+    if (op === 0x8E) { // MOV Sreg, r/m — the reg field's top bit is ignored; loading SS delays IRQs by one instruction
+        const m = modrmDec(); const sr = SEG_REG_NAMES[m.reg & 3];
+        e.reg[sr] = rmRd(m, true);
+        if (sr === "SS") e.inhibitIRQ = true;
+        return true;
+    }
+    if (op === 0x8C) { const m = modrmDec(); rmWr(m, true, e.reg[SEG_REG_NAMES[m.reg & 3]]); return true; } // MOV r/m, Sreg
+    if (op === 0x8B) { const m = modrmDec(); setReg16(m.reg, rmRd(m, true)); return true; } // MOV r16, r/m16
+    if (op === 0x8A) { const m = modrmDec(); setReg8(m.reg, rmRd(m, false)); return true; } // MOV r8, r/m8
+    if (op === 0x89) { const m = modrmDec(); rmWr(m, true, getReg16(m.reg)); return true; } // MOV r/m16, r16
+    if (op === 0x88) { const m = modrmDec(); rmWr(m, false, getReg8(m.reg)); return true; } // MOV r/m8, r8
+    if (op === 0xC7) { const m = modrmDec(); rmWr(m, true, fetch16()); return true; } // MOV r/m16, imm16
+    if (op === 0xC6) { const m = modrmDec(); rmWr(m, false, fetch8()); return true; } // MOV r/m8, imm8
+    if (op === 0xC4 || op === 0xC5) { // LES / LDS — the register form is undefined
+        const m = modrmDec();
+        if (m.mod === 3) return undefinedOp();
+        const off = readWordSeg(e, m.seg, m.ea); const seg = readWordSeg(e, m.seg, (m.ea + 2) & 0xFFFF);
+        setReg16(m.reg, off);
+        if (op === 0xC4) e.reg.ES = seg; else e.reg.DS = seg;
+        return true;
+    }
+    if (op === 0x8F) { // POP r/m16 (only /0 is defined; other encodings just consume the operand)
+        const m = modrmDec();
+        if (m.reg === 0) rmWr(m, true, pop16(e));
+        return true;
+    }
+    if (op === 0xA0 || op === 0xA1 || op === 0xA2 || op === 0xA3) { // MOV AL/AX <-> [moffs16]
+        const off = fetch16(); const seg = segOv !== null ? segOv : e.reg.DS;
+        if (op === 0xA0) setReg8(0, readMem8(e, calcPhys(seg, off)));
+        else if (op === 0xA1) setReg16(0, readWordSeg(e, seg, off));
+        else if (op === 0xA2) writeMem8(e, calcPhys(seg, off), getReg8(0));
+        else writeWordSeg(e, seg, off, getReg16(0));
+        return true;
+    }
+    if (op === 0xD6 && !is186) { setReg8(0, e.flags.CF ? 0xFF : 0x00); return true; } // SALC (undocumented on the 8086)
+    if (op >= 0xD8 && op <= 0xDF) { modrmDec(); return true; } // ESC — no coprocessor: consume the operand, do nothing
+    if (op === 0x0F && !is186) { e.reg.CS = pop16(e); return true; } // POP CS (8086 only)
 
     // INC/DEC preserve CF; set OF/AF/SF/ZF/PF.
     if (op >= 0x40 && op <= 0x47) { const r=op-0x40; const orig=getReg16(r); const v=(orig+1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.AF=computeAF(orig,1,orig+1); e.flags.PF=calcParity(v); return true; } // INC r16
     if (op >= 0x48 && op <= 0x4F) { const r=op-0x48; const orig=getReg16(r); const v=(orig-1)&0xFFFF; setReg16(r,v); updFlags(v,true); e.flags.OF=orig===0x8000?1:0; e.flags.AF=computeAF(orig,1,orig-1); e.flags.PF=calcParity(v); return true; } // DEC r16
     if (op === 0xFE) {
-        const m=modrmDec(false); const orig=rmRd(m,false);
+        // Host callback used by the BIOS stubs: FE 38 <id>. (FE /7 is undefined on the 8086.)
+        if (readMem8(e, calcPhys(e.reg.CS, e.reg.IP)) === 0x38) {
+            fetch8();
+            const id = fetch8();
+            const service = e.hle[id];
+            if (!service) return undefinedOp();
+            const outcome = service(e, ctx);
+            if (outcome === 'stop') return false;
+            if (outcome === 'retry') { // blocking service: run the stub again, with interrupts enabled so IRQs can arrive
+                e.reg.IP = opIP;
+                e.flags.IF = 1;
+                return true;
+            }
+            // Hand CF/ZF results back through the stacked FLAGS (the stub's IRET restores the rest).
+            const flagsAt = calcPhys(e.reg.SS, e.reg.SP + 4);
+            const stacked = readMemWord(e, flagsAt);
+            writeMemWord(e, flagsAt, (stacked & ~0x0041) | (e.flags.CF ? 0x0001 : 0) | (e.flags.ZF ? 0x0040 : 0));
+            return true;
+        }
+        const m=modrmDec(); const orig=rmRd(m,false);
         if (m.reg===0) { const res=orig+1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x7F?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
         else if (m.reg===1) { const res=orig-1; rmWr(m,false,res); updFlags(res,false); e.flags.OF=orig===0x80?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
         return true;
     }
     if (op === 0xFF) {
-        const m=modrmDec(true);
+        const m=modrmDec();
         if(m.reg===0) { const orig=rmRd(m,true); const res=orig+1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x7FFF?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
         else if(m.reg===1) { const orig=rmRd(m,true); const res=orig-1; rmWr(m,true,res); updFlags(res,true); e.flags.OF=orig===0x8000?1:0; e.flags.AF=computeAF(orig,1,res); e.flags.PF=calcParity(res); }
-        else if(m.reg===2||m.reg===4){ if(m.reg===2) push16(e, e.reg.IP); e.reg.IP=rmRd(m,true); }
-        else if(m.reg===6) push16(e, rmRd(m,true));
+        else if(m.reg===2||m.reg===4){ const target=rmRd(m,true); if(m.reg===2) push16(e, e.reg.IP); e.reg.IP=target; } // CALL/JMP near r/m — operand is read before the push
+        else if(m.reg===3||m.reg===5){ // CALL/JMP far [m] — the register form is undefined and ignored
+            if (m.mod!==3) {
+                const off=readWordSeg(e, m.seg, m.ea); const seg=readWordSeg(e, m.seg, (m.ea+2)&0xFFFF);
+                if(m.reg===3){ push16(e, e.reg.CS); push16(e, e.reg.IP); }
+                e.reg.IP=off; e.reg.CS=seg;
+            }
+        }
+        else if(m.reg===6||m.reg===7) push16(e, rmRd(m,true)); // /7 is an undocumented alias of PUSH on the 8086
         return true;
     }
 
-    if (op >= 0x50 && op <= 0x57) { push16(e, getReg16(op-0x50)); return true; } // PUSH r16
+    // PUSH r16 — PUSH SP stores the already-decremented SP on the 8086 (the 186 stores the original value).
+    if (op >= 0x50 && op <= 0x57) { push16(e, (op === 0x54 && !is186) ? (e.reg.SP - 2) & 0xFFFF : getReg16(op-0x50)); return true; }
     if (op >= 0x58 && op <= 0x5F) { setReg16(op-0x58, pop16(e)); return true; } // POP r16
     if (op === 0x06) { push16(e, e.reg.ES); return true; } // PUSH ES
     if (op === 0x07) { e.reg.ES = pop16(e); return true; } // POP ES
     if (op === 0x0E) { push16(e, e.reg.CS); return true; } // PUSH CS
     if (op === 0x16) { push16(e, e.reg.SS); return true; } // PUSH SS
-    if (op === 0x17) { e.reg.SS = pop16(e); return true; } // POP SS
+    if (op === 0x17) { e.reg.SS = pop16(e); e.inhibitIRQ = true; return true; } // POP SS — IRQs are recognised after the next instruction
     if (op === 0x1E) { push16(e, e.reg.DS); return true; } // PUSH DS
     if (op === 0x1F) { e.reg.DS = pop16(e); return true; } // POP DS
     if (op === 0x60) { const sp = e.reg.SP; push16(e, e.reg.AX); push16(e, e.reg.CX); push16(e, e.reg.DX); push16(e, e.reg.BX); push16(e, sp); push16(e, e.reg.BP); push16(e, e.reg.SI); push16(e, e.reg.DI); return true; } // PUSHA
     if (op === 0x61) { e.reg.DI = pop16(e); e.reg.SI = pop16(e); e.reg.BP = pop16(e); pop16(e); e.reg.BX = pop16(e); e.reg.DX = pop16(e); e.reg.CX = pop16(e); e.reg.AX = pop16(e); return true; } // POPA
     if (op === 0xC9) { e.reg.SP = e.reg.BP; e.reg.BP = pop16(e); return true; } // LEAVE
+
+    // 80186 additions. On the 8086 these opcodes were remapped to their aliases above (or are undefined).
+    if (is186) {
+        if (op === 0x68) { push16(e, fetch16()); return true; }                          // PUSH imm16
+        if (op === 0x6A) { push16(e, (fetch8() << 24 >> 24) & 0xFFFF); return true; }     // PUSH imm8 (sign-extended)
+        if (op === 0x69 || op === 0x6B) { // IMUL r16, r/m16, imm16 / imm8
+            const m = modrmDec(); const src = rmRd(m, true);
+            const imm = op === 0x69 ? fetch16() : (fetch8() << 24 >> 24);
+            const prod = ((src << 16) >> 16) * ((imm << 16) >> 16);
+            setReg16(m.reg, prod & 0xFFFF);
+            e.flags.CF = e.flags.OF = (prod < -32768 || prod > 32767) ? 1 : 0;
+            return true;
+        }
+        if (op === 0x62) { // BOUND r16, m16:16 — INT 5 when the index is outside [lower, upper]
+            const m = modrmDec();
+            if (m.mod === 3) return undefinedOp();
+            const lo = (readWordSeg(e, m.seg, m.ea) << 16) >> 16;
+            const hi = (readWordSeg(e, m.seg, (m.ea + 2) & 0xFFFF) << 16) >> 16;
+            const idx = (getReg16(m.reg) << 16) >> 16;
+            if (idx < lo || idx > hi) { e.reg.IP = opIP; raiseInt(e, 5); }
+            return true;
+        }
+        if (op === 0xC8) { // ENTER size, level
+            const size = fetch16(); const level = fetch8() & 0x1F;
+            push16(e, e.reg.BP);
+            const frame = e.reg.SP;
+            if (level > 0) {
+                for (let i = 1; i < level; i++) { e.reg.BP = (e.reg.BP - 2) & 0xFFFF; push16(e, readWordSeg(e, e.reg.SS, e.reg.BP)); }
+                push16(e, frame);
+            }
+            e.reg.BP = frame;
+            e.reg.SP = (e.reg.SP - size) & 0xFFFF;
+            return true;
+        }
+    }
 
     const isALUModRM = (op >= 0x00 && op <= 0x03) || (op >= 0x08 && op <= 0x0B) ||
                        (op >= 0x10 && op <= 0x13) || (op >= 0x18 && op <= 0x1B) ||
@@ -515,7 +373,7 @@ const executeBinaryStep = (e, ctx) => {
         const aluOp = (op >> 3) & 7;
         const isWord = (op & 1) === 1;
         const dir = (op & 2) !== 0;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         const rmVal = rmRd(m, isWord);
         const regVal = isWord ? getReg16(m.reg) : getReg8(m.reg);
         const dst = dir ? regVal : rmVal;
@@ -545,7 +403,7 @@ const executeBinaryStep = (e, ctx) => {
 
     if (op >= 0x80 && op <= 0x83) {
         const isWord = op === 0x81 || op === 0x83;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         let imm = fetch8();
         if (op === 0x81) { const hi = fetch8(); imm = (hi << 8) | imm; }
         else if (op === 0x83) imm = (imm << 24 >> 24) & (isWord ? 0xFFFF : 0xFF); // sign-extend then mask to operand width
@@ -560,7 +418,7 @@ const executeBinaryStep = (e, ctx) => {
 
     if (op === 0x84 || op === 0x85) {
         const isWord = op === 0x85;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         const v1 = rmRd(m, isWord);
         const v2 = isWord ? getReg16(m.reg) : getReg8(m.reg);
         const res = v1 & v2;
@@ -569,14 +427,14 @@ const executeBinaryStep = (e, ctx) => {
     }
     
     if (op === 0x8D) {
-        const m = modrmDec(true);
+        const m = modrmDec();
         setReg16(m.reg, m.ea);
         return true;
     }
 
     if (op === 0x86 || op === 0x87) {
         const isWord = op === 0x87;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         const v1 = rmRd(m, isWord);
         const v2 = isWord ? getReg16(m.reg) : getReg8(m.reg);
         rmWr(m, isWord, v2);
@@ -601,7 +459,7 @@ const executeBinaryStep = (e, ctx) => {
     
     if (op === 0xF6 || op === 0xF7) {
         const isWord = op === 0xF7;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         if (m.reg === 0 || m.reg === 1) { 
             const imm = isWord ? fetch16() : fetch8();
             const v1 = rmRd(m, isWord);
@@ -651,7 +509,7 @@ const executeBinaryStep = (e, ctx) => {
                     const dvnd = hi * 0x10000 + e.reg.AX;
                     const ds = (d << 16) >> 16;
                     const q = Math.trunc(dvnd / ds);
-                    if (q > 32767 || q < -32768) { raiseInt(e, 0); return true; }
+                    if (q > 32767 || q < (is186 ? -32768 : -32767)) { raiseInt(e, 0); return true; } // 8086 also faults on 0x8000
                     e.reg.AX = q & 0xFFFF; e.reg.DX = (dvnd - q * ds) & 0xFFFF;
                 }
             } else {
@@ -663,7 +521,7 @@ const executeBinaryStep = (e, ctx) => {
                 } else {
                     const dvnd = (e.reg.AX << 16) >> 16; const ds = (d << 24) >> 24;
                     const q = Math.trunc(dvnd / ds);
-                    if (q > 127 || q < -128) { raiseInt(e, 0); return true; }
+                    if (q > 127 || q < (is186 ? -128 : -127)) { raiseInt(e, 0); return true; } // 8086 also faults on 0x80
                     e.reg.AX = (((dvnd - q * ds) & 0xFF) << 8) | (q & 0xFF);
                 }
             }
@@ -757,11 +615,20 @@ const executeBinaryStep = (e, ctx) => {
         const isWord = op === 0xC1 || op === 0xD1 || op === 0xD3;
         const isCL = op === 0xD2 || op === 0xD3;
         const isImm = op === 0xC0 || op === 0xC1;
-        const m = modrmDec(isWord);
+        const m = modrmDec();
         
         let count = 1;
         if (isCL) count = e.reg.CX & 0xFF; else if (isImm) count = fetch8();
-        count &= 0x1F;
+        if (is186) count &= 0x1F; // only the 186+ masks the count; the 8086 honours all 8 bits of CL
+
+        // Undocumented 8086 SETMO (D0/D1 /6) and SETMOC (D2/D3 /6, only when CL != 0): set every bit.
+        if (m.reg === 6 && !is186) {
+            if (count > 0) {
+                rmWr(m, isWord, isWord ? 0xFFFF : 0xFF);
+                e.flags.CF = 0; e.flags.OF = 0; e.flags.AF = 0; e.flags.SF = 1; e.flags.ZF = 0; e.flags.PF = 1;
+            }
+            return true;
+        }
 
         if (count > 0) {
             let val = rmRd(m, isWord);
@@ -843,45 +710,42 @@ const executeBinaryStep = (e, ctx) => {
         return true;
     }
 
-    if (op === 0xCD) {
-        const iNum = fetch8();
-        if (iNum === 0x10) handleInt10(e);
-        else if (iNum === 0x13) handleInt13(e);
-        else if (iNum === 0x16) handleInt16(e);
-        else { push16(e, packFlags(e)); push16(e, e.reg.CS); push16(e, e.reg.IP); e.reg.IP = readMemWord(e, calcPhys(0, iNum*4)); e.reg.CS = readMemWord(e, calcPhys(0, iNum*4 + 2)); }
-        return true;
-    }
+    if (op === 0xCD) { raiseInt(e, fetch8()); return true; } // INT n — always through the IVT
 
-    if ((op >= 0xA4 && op <= 0xA7) || (op >= 0xAA && op <= 0xAF)) {
+    if ((op >= 0xA4 && op <= 0xA7) || (op >= 0xAA && op <= 0xAF) || (is186 && op >= 0x6C && op <= 0x6F)) {
         const isWord = (op % 2) === 1;
         const sz = isWord ? 2 : 1;
         const dir = e.flags.DF === 0 ? sz : -sz;
+        const srcSeg = segOv !== null ? segOv : e.reg.DS;
+        const rdSeg = (seg, off) => isWord ? readWordSeg(e, seg, off) : readMem8(e, calcPhys(seg, off));
+        const wrSeg = (seg, off, v) => { if (isWord) writeWordSeg(e, seg, off, v); else writeMem8(e, calcPhys(seg, off), v); };
 
         const doStringOp = () => {
-            if (op === 0xA4 || op === 0xA5) { 
-                const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
-                const d = calcPhys(e.reg.ES, e.reg.DI);
-                if (isWord) writeMemWord(e, d, readMemWord(e, s)); else writeMem8(e, d, readMem8(e, s));
+            if (op === 0xA4 || op === 0xA5) { // MOVS
+                wrSeg(e.reg.ES, e.reg.DI, rdSeg(srcSeg, e.reg.SI));
                 e.reg.SI = (e.reg.SI + dir) & 0xFFFF; e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
-            } else if (op === 0xAC || op === 0xAD) { 
-                const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
-                if (isWord) setReg16(0, readMemWord(e, s)); else setReg8(0, readMem8(e, s)); 
+            } else if (op === 0xAC || op === 0xAD) { // LODS
+                if (isWord) setReg16(0, rdSeg(srcSeg, e.reg.SI)); else setReg8(0, rdSeg(srcSeg, e.reg.SI));
                 e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
-            } else if (op === 0xAA || op === 0xAB) { 
-                const d = calcPhys(e.reg.ES, e.reg.DI);
-                if (isWord) writeMemWord(e, d, getReg16(0)); else writeMem8(e, d, getReg8(0));
+            } else if (op === 0xAA || op === 0xAB) { // STOS
+                wrSeg(e.reg.ES, e.reg.DI, isWord ? getReg16(0) : getReg8(0));
                 e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
-            } else if (op === 0xA6 || op === 0xA7 || op === 0xAE || op === 0xAF) { 
-                const d = calcPhys(e.reg.ES, e.reg.DI);
+            } else if (op === 0x6C || op === 0x6D) { // INS (186): port DX -> ES:DI
+                wrSeg(e.reg.ES, e.reg.DI, isWord ? ctx.bus.readWord(e.reg.DX) : ctx.bus.read(e.reg.DX));
+                e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
+            } else if (op === 0x6E || op === 0x6F) { // OUTS (186): DS:SI -> port DX
+                const v = rdSeg(srcSeg, e.reg.SI);
+                if (isWord) ctx.bus.writeWord(e.reg.DX, v); else ctx.bus.write(e.reg.DX, v);
+                e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
+            } else if (op === 0xA6 || op === 0xA7 || op === 0xAE || op === 0xAF) { // CMPS / SCAS
                 let v1, v2;
-                if (op === 0xA6 || op === 0xA7) { 
-                    const s = calcPhys(segOv !== null ? segOv : e.reg.DS, e.reg.SI);
-                    v1 = isWord ? readMemWord(e, s) : readMem8(e, s);
-                    v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
+                if (op === 0xA6 || op === 0xA7) {
+                    v1 = rdSeg(srcSeg, e.reg.SI);
+                    v2 = rdSeg(e.reg.ES, e.reg.DI);
                     e.reg.SI = (e.reg.SI + dir) & 0xFFFF;
-                } else { 
+                } else {
                     v1 = isWord ? getReg16(0) : getReg8(0);
-                    v2 = isWord ? readMemWord(e, d) : readMem8(e, d);
+                    v2 = rdSeg(e.reg.ES, e.reg.DI);
                 }
                 e.reg.DI = (e.reg.DI + dir) & 0xFFFF;
                 // CMPS/SCAS: full SUB-style flag set (ZF/SF/PF/CF/OF/AF).
@@ -902,38 +766,39 @@ const executeBinaryStep = (e, ctx) => {
         return true;
     }
 
-    // Undefined opcode — rewind IP to the start of the faulting instruction and dispatch INT 6
-    // (the 8086 itself didn't have #UD, but raising INT 6 lets a guest handle invalid opcodes
-    // gracefully instead of aborting the emulator).
-    e.reg.IP = opIP;
-    raiseInt(e, 6);
-    return true;
+    // Anything left is undefined. The 186 raises INT 6 with the faulting instruction's address;
+    // the 8086 has no such trap and simply ignores the instruction.
+    return undefinedOp();
 };
 
 /**
- * Execute one CPU step with hardware interrupt checking.
+ * Execute one CPU step: one instruction (or an idle tick while halted) followed by the
+ * single-step trap and hardware-interrupt checks.
  * @param {object} e - CPU engine state
  * @param {object} ctx - External context: { bus, keyboard, shiftState, pic }
- * @returns {boolean} true to continue, false to halt
+ * @returns {boolean} true to continue, false to stop (HLT with nothing able to wake the CPU)
  */
 const executeStep = (e, ctx) => {
-    const result = executeBinaryStep(e, ctx);
-    // After each instruction, check for pending hardware interrupts
+    let result = true;
+    if (!e.halted) {
+        const trap = e.flags.TF; // TF is sampled before the instruction runs
+        result = executeBinaryStep(e, ctx);
+        if (result && trap && e.flags.TF) raiseInt(e, 1); // single-step trap
+    }
+    // STI / MOV SS / POP SS: the instruction that follows runs before any IRQ is recognised.
+    if (e.inhibitIRQ) { e.inhibitIRQ = false; return result; }
     if (ctx.pic && e.flags.IF && ctx.pic.hasPendingInterrupt()) {
         const vector = ctx.pic.acknowledge();
         if (vector >= 0) {
-            push16(e, packFlags(e));
-            e.flags.IF = 0; // disable interrupts while servicing
-            push16(e, e.reg.CS);
-            push16(e, e.reg.IP);
-            e.reg.IP = readMemWord(e, calcPhys(0, vector * 4));
-            e.reg.CS = readMemWord(e, calcPhys(0, vector * 4 + 2));
+            e.halted = false;
+            raiseInt(e, vector);
         }
     }
     return result;
 };
 
 export {
+    ROM_BASE,
     ADDR_SPACE,
     DISK_SIZE,
     SECTOR_SIZE,
@@ -950,8 +815,12 @@ export {
     writeMem8Safe,
     readMemWord,
     writeMemWord,
+    readWordSeg,
+    writeWordSeg,
     push16,
     pop16,
+    raiseInt,
+    createEngine,
     packFlags,
     unpackFlags,
     executeBinaryStep,

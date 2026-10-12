@@ -76,6 +76,21 @@ class PIC8259Device extends IODevice {
     }
 
     /**
+     * Pulse an edge-triggered request: a rising edge immediately followed by the line going low again.
+     * This is what a keyboard or timer does; without the falling edge the line would stay high and
+     * every later request would be missed.
+     */
+    pulseIRQ(irq) {
+        this.raiseIRQ(irq);
+        this.lowerIRQ(irq);
+    }
+
+    /** Non-specific end-of-interrupt (what `out 20h, 20h` does). */
+    eoi() {
+        this._nonSpecificEOI();
+    }
+
+    /**
      * Called by the CPU after each instruction when IF=1.
      * Returns the interrupt vector number (0-255) if there is a pending,
      * unmasked interrupt of higher priority than what is currently in service.
@@ -93,10 +108,10 @@ class PIC8259Device extends IODevice {
             const mask = 1 << i;
             if (!(pending & mask)) continue;
 
-            // Check priority: cannot service if a higher-priority (lower number)
-            // interrupt is already in service
-            const higherPriorityISR = this.isr & (mask - 1); // bits below current
-            if (higherPriorityISR) return -1; // blocked by higher-priority ISR
+            // Check priority: a request is blocked by any interrupt of the same or higher
+            // priority (this bit and every lower-numbered one) that is still in service.
+            const blockingISR = this.isr & ((mask << 1) - 1);
+            if (blockingISR) return -1;
 
             // Acknowledge this interrupt
             this.irr &= ~mask;
@@ -117,7 +132,7 @@ class PIC8259Device extends IODevice {
         for (let i = 0; i < 8; i++) {
             const mask = 1 << i;
             if (!(pending & mask)) continue;
-            if (this.isr & (mask - 1)) return false;
+            if (this.isr & ((mask << 1) - 1)) return false; // same or higher priority still in service
             return true;
         }
         return false;

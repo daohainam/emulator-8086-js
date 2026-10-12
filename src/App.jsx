@@ -7,15 +7,18 @@ import { DiskDevice } from './devices/DiskDevice.js';
 import { KeyboardDevice } from './devices/KeyboardDevice.js';
 import { PIC8259Device } from './devices/PIC8259Device.js';
 import {
-    ADDR_SPACE, DISK_SIZE, SECTOR_SIZE, FLOPPY_SIZE,
-    VGA_BASE, VGA_COLS, VGA_ROWS, VGA_SIZE,
-    toHex, calcPhys, calcParity,
-    readMem8, writeMem8, writeMem8Safe,
-    readMemWord, writeMemWord,
-    push16, pop16,
-    packFlags, unpackFlags,
+    ADDR_SPACE, SECTOR_SIZE, FLOPPY_SIZE,
+    VGA_BASE, VGA_COLS, VGA_ROWS,
+    toHex, calcPhys,
+    readMem8, writeMem8Safe,
+    packFlags,
+    createEngine,
     executeStep,
 } from './CPU8086.js';
+import { resetMachine, startProgram, bootFromDisk as loadBootSector, hasBootSignature, BOOT_LOAD_ADDR } from './Machine.js';
+import { BDA, getCursor, setCursor, refreshTicks, wb } from './bios/bda.js';
+import { installRom } from './bios/rom.js';
+import { enqueueKey } from './bios/int16.js';
 
 // ==========================================
 // 1. CONSTANTS & UTILITIES
@@ -25,19 +28,15 @@ const DOS_COLORS = [
     "#555555", "#5555FF", "#55FF55", "#55FFFF", "#FF5555", "#FF55FF", "#FFFF55", "#FFFFFF"
 ];
 
-const BOOT_LOAD_ADDR    = 0x7C00;   // BIOS boot sector load address
-const INITIAL_SP        = 0xFFFE;   // Initial stack pointer value
-const RESET_VECTOR_PHYS = 0xFFFF0;  // Physical address of x86 reset vector (0xFFFF:0x0000)
-const BIOS_ENTRY_SEG    = 0xC000;   // BIOS ROM segment
-const BIOS_ENTRY_OFF    = 0x0003;   // BIOS ROM entry point offset
-
-// BDA keyboard buffer — all values are physical addresses or BDA-relative offsets
-const BDA_SEG_PHYS         = 0x0400;  // Physical base of BDA segment (0x0040 << 4)
-const BDA_KBD_STATUS1_PHYS = 0x0417;  // Physical: keyboard status byte 1
-const BDA_KBD_HEAD_PHYS    = 0x041A;  // Physical: buffer head pointer
-const BDA_KBD_TAIL_PHYS    = 0x041C;  // Physical: buffer tail pointer
-const BDA_KBD_BUF_OFF      = 0x1E;   // BDA-relative offset: start of buffer
-const BDA_KBD_BUF_END_OFF  = 0x3E;   // BDA-relative offset: one past end
+// Emulated CPU speed (instructions per second). A 4.77 MHz 8088 retires roughly 0.3-0.4 million
+// instructions per second; "max" runs flat out within the frame time budget.
+const SPEEDS = [
+    { id: '477', label: '4.77 MHz', ips: 400_000 },
+    { id: '10', label: '10 MHz', ips: 900_000 },
+    { id: 'max', label: 'Max', ips: Infinity },
+];
+const FRAME_TIME_BUDGET_MS = 12;    // never block the UI thread for longer than this per animation frame
+const MAX_FRAME_DELTA_MS = 50;      // clamp after tab switches so the CPU does not "catch up" in one burst
 
 const DEFAULT_CODE = `ORG 100h
 
@@ -71,7 +70,7 @@ hello8086:
 // 2. UI SUB-COMPONENTS
 // ==========================================
 
-function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, loadStateFromJson, saveStateToJson }) {
+function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleReset, toggleRun, stepUI, loadStateFromJson, saveStateToJson, speedId, setSpeedId }) {
     return (
         <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
             <div className="flex items-center space-x-4">
@@ -108,6 +107,12 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
                 <button onClick={bootFromDisk} disabled={isRunning} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">🚀 Boot</button>
                 <button onClick={assemble} disabled={isRunning} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">Assemble</button>
                 <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all active:scale-95">🔄 Reset</button>
+                <label className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300" title="Emulated CPU speed">
+                    <span>Speed</span>
+                    <select value={speedId} onChange={ev => setSpeedId(ev.target.value)} className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 font-bold focus:outline-none">
+                        {SPEEDS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </label>
                 <button onClick={toggleRun} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg ${isRunning ? "bg-red-600" : "bg-emerald-600"}`}>
                     {isRunning ? "Stop" : "Run"}
                 </button>
@@ -117,7 +122,7 @@ function HeaderControls({ isRunning, initAudio, bootFromDisk, assemble, handleRe
     );
 }
 
-function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
+function CodeEditor({ code, setCode, orgOffset, setOrgOffset, cpuModel, setCpuModel }) {
     const [maximized, setMaximized] = React.useState(false);
     const inner = (
         <div className={maximized ? "fixed inset-0 z-50 flex flex-col bg-slate-900" : "bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-xl flex flex-col h-[500px] lg:h-[740px]"}>
@@ -127,6 +132,13 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
                     <div className="flex items-center space-x-2">
                         <span className="text-slate-500">ORG (Origin):</span>
                         <input type="text" value={orgOffset} onChange={ev => setOrgOffset(ev.target.value)} className="w-14 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 text-center font-bold focus:outline-none focus:border-amber-500" />
+                    </div>
+                    <div className="flex items-center space-x-2" title="Instruction set: strict 8086, or 80186 additions (PUSHA, ENTER, shift by imm8, ...). A 'cpu 186' line in the source also selects 186.">
+                        <span className="text-slate-500">CPU:</span>
+                        <select value={cpuModel} onChange={ev => setCpuModel(ev.target.value)} className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-amber-400 font-bold focus:outline-none focus:border-amber-500">
+                            <option value="8086">8086</option>
+                            <option value="186">80186</option>
+                        </select>
                     </div>
                     <label className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded cursor-pointer transition-all active:scale-95">
                         📂 Load .asm
@@ -157,16 +169,17 @@ function CodeEditor({ code, setCode, orgOffset, setOrgOffset }) {
     return inner;
 }
 
-function VGAMonitor({ memory, cs, ip, cursorX, cursorY, onKeyDown, onKeyUp }) {
-    if (!memory) return null;
+function VGAMonitor({ memory, cs, ip, cursorX, cursorY }) {
     const [focused, setFocused] = React.useState(false);
+    if (!memory) return null;
+    // The BIOS keeps the active text page in the BDA (0040:0062); each page is 4 KB.
+    const pageBaseAddr = VGA_BASE + (memory[BDA.ACTIVE_PAGE] & 7) * 0x1000;
 
     return (
         <div
             className={`bg-slate-800 p-2 rounded-xl border-4 shadow-2xl flex flex-col items-center overflow-x-auto outline-none transition-colors ${focused ? 'border-green-500' : 'border-slate-700'}`}
             tabIndex={0}
-            onKeyDown={onKeyDown}
-            onKeyUp={onKeyUp}
+            data-kbd-capture="true"
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             title="VGA Screen — click here and type to send keyboard input"
@@ -183,9 +196,8 @@ function VGAMonitor({ memory, cs, ip, cursorX, cursorY, onKeyDown, onKeyUp }) {
                     <div key={y} className="flex h-[1.1em]">
                         {Array.from({ length: VGA_COLS }).map((_, x) => {
                             const offset = (y * VGA_COLS + x) * 2;
-                            const charCode = memory[VGA_BASE + offset] || 0;
-                            let attr = memory[VGA_BASE + offset + 1];
-                            if (attr === 0) attr = 0x07;
+                            const charCode = memory[pageBaseAddr + offset] || 0;
+                            const attr = memory[pageBaseAddr + offset + 1];
                             const fg = DOS_COLORS[attr & 0x0F];
                             const bg = DOS_COLORS[(attr >> 4) & 0x0F];
                             const displayChar = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : ' ';
@@ -205,7 +217,7 @@ function VGAMonitor({ memory, cs, ip, cursorX, cursorY, onKeyDown, onKeyUp }) {
     );
 }
 
-function KeyboardPanel({ keyboardDevice, handleKeyDown, handleKeyUp, forceRender }) {
+function KeyboardPanel({ keyboardDevice, forceRender }) {
     const inputRef = React.useRef(null);
     const buffer = keyboardDevice ? keyboardDevice.buffer : [];
 
@@ -214,13 +226,10 @@ function KeyboardPanel({ keyboardDevice, handleKeyDown, handleKeyUp, forceRender
         forceRender();
     };
 
-    // Intercept keydown on the text input and route through the shared handler,
-    // then reset value so it stays empty (characters go into the device buffer, not the input).
+    // Keys typed into this input reach the emulator through the root key handler (the input is a
+    // keyboard-capture region); here we only keep the native field empty.
     const onInputKeyDown = (e) => {
-        // Prevent browser default for Tab so it routes as a key, not focus-change
         if (e.key === 'Tab') e.preventDefault();
-        handleKeyDown(e);
-        // Clear the native input value after the key is processed
         requestAnimationFrame(() => { if (inputRef.current) inputRef.current.value = ''; });
     };
 
@@ -245,8 +254,8 @@ function KeyboardPanel({ keyboardDevice, handleKeyDown, handleKeyUp, forceRender
                     type="text"
                     className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[12px] text-emerald-300 font-mono focus:outline-none focus:border-cyan-500 placeholder-slate-600"
                     placeholder="click and type…"
+                    data-kbd-capture="true"
                     onKeyDown={onInputKeyDown}
-                    onKeyUp={handleKeyUp}
                     onChange={() => {}}  /* controlled — value reset via rAF */
                     autoComplete="off" autoCorrect="off" spellCheck={false}
                 />
@@ -671,6 +680,7 @@ function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, pac
             <div className="mt-4 pt-4 border-t border-slate-800">
                 <div className="text-[9px] font-bold text-slate-500 uppercase mb-2">BIOS Status</div>
                 <div className="text-[10px] space-y-1">
+                    <div className="flex justify-between"><span>CPU:</span> <span className={e.halted ? "text-amber-400" : "text-slate-300"}>{e.cpuModel === '186' ? '80186' : '8086'}{e.halted ? ' · idle (HLT)' : ''}</span></div>
                     <div className="flex justify-between"><span>Boot Sig:</span> <span className={hasBootSig ? "text-emerald-500" : "text-red-500"}>{hasBootSig ? "0xAA55" : "MISSING"}</span></div>
                     <div className="flex justify-between"><span>Audio:</span> <span className={speakerRef.current?.beeping ? "text-amber-400" : "text-slate-600"}>{speakerRef.current?.beeping ? "ON" : "OFF"}</span></div>
                 </div>
@@ -691,6 +701,35 @@ function RegistersPanel({ eng, isRunning, handleRegChange, handleFlagChange, pac
     );
 }
 
+// IBM PC scan codes for common keys
+const SCAN_CODES = {
+    'Escape': 0x01, '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
+    '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A, '0': 0x0B, '-': 0x0C, '=': 0x0D,
+    'Backspace': 0x0E, 'Tab': 0x0F,
+    'q': 0x10, 'w': 0x11, 'e': 0x12, 'r': 0x13, 't': 0x14, 'y': 0x15, 'u': 0x16,
+    'i': 0x17, 'o': 0x18, 'p': 0x19, '[': 0x1A, ']': 0x1B, 'Enter': 0x1C,
+    'a': 0x1E, 's': 0x1F, 'd': 0x20, 'f': 0x21, 'g': 0x22, 'h': 0x23,
+    'j': 0x24, 'k': 0x25, 'l': 0x26, ';': 0x27, "'": 0x28, '`': 0x29,
+    '\\': 0x2B, 'z': 0x2C, 'x': 0x2D, 'c': 0x2E, 'v': 0x2F, 'b': 0x30,
+    'n': 0x31, 'm': 0x32, ',': 0x33, '.': 0x34, '/': 0x35,
+    ' ': 0x39,
+    'F1': 0x3B, 'F2': 0x3C, 'F3': 0x3D, 'F4': 0x3E, 'F5': 0x3F,
+    'F6': 0x40, 'F7': 0x41, 'F8': 0x42, 'F9': 0x43, 'F10': 0x44,
+    'ArrowUp': 0x48, 'ArrowLeft': 0x4B, 'ArrowRight': 0x4D, 'ArrowDown': 0x50,
+    'Insert': 0x52, 'Delete': 0x53, 'Home': 0x47, 'End': 0x4F,
+    'PageUp': 0x49, 'PageDown': 0x51,
+};
+// Uppercase / shifted chars share scan code with their base key
+const SHIFTED_SCAN = {
+    'Q':0x10,'W':0x11,'E':0x12,'R':0x13,'T':0x14,'Y':0x15,'U':0x16,'I':0x17,'O':0x18,'P':0x19,
+    'A':0x1E,'S':0x1F,'D':0x20,'F':0x21,'G':0x22,'H':0x23,'J':0x24,'K':0x25,'L':0x26,
+    'Z':0x2C,'X':0x2D,'C':0x2E,'V':0x2F,'B':0x30,'N':0x31,'M':0x32,
+    '!':0x02,'@':0x03,'#':0x04,'$':0x05,'%':0x06,'^':0x07,'&':0x08,'*':0x09,'(':0x0A,')':0x0B,
+    '_':0x0C,'+':0x0D,'{':0x1A,'}':0x1B,'|':0x2B,':':0x27,'"':0x28,'~':0x29,'<':0x33,'>':0x34,'?':0x35,
+};
+// Extended (non-ASCII) keys: char=0, scan in high byte
+const EXTENDED_KEYS = new Set(['ArrowUp','ArrowLeft','ArrowRight','ArrowDown','Insert','Delete','Home','End','PageUp','PageDown','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10']);
+
 // ==========================================
 // 3. MAIN APP & CPU CORE LOGIC
 // ==========================================
@@ -700,18 +739,23 @@ export default function Emulator8086() {
     const [errorMessage, setErrorMessage] = useState(null);
     const [isRunning, setIsRunning] = useState(false);
 
-    const [orgOffset, setOrgOffset] = useState("0x0000"); 
+    const [orgOffset, setOrgOffset] = useState("0x0000");
+    const [cpuModel, setCpuModelState] = useState('8086');
     const [memSegStr, setMemSegStr] = useState("0x0000"); 
     const [memOffStr, setMemOffStr] = useState("0x0000");
     const [showMem2, setShowMem2] = useState(false);
     const [mem2SegStr, setMem2SegStr] = useState("0xB800"); 
     const [mem2OffStr, setMem2OffStr] = useState("0x0000");
     
-    const [ioLogs, setIoLogs] = useState([]);
+    const [speedId, setSpeedId] = useState('477');
     const [, setTick] = useState(0);
     const forceRender = () => setTick(t => t + 1);
 
+    // Logs live in a ref (a bus OUT can fire thousands of times per frame); the panel re-renders once per frame.
+    const ioLogsRef = useRef([]);
     const isRunningRef = useRef(false);
+    const speedRef = useRef(SPEEDS[0].ips);
+    const lastFrameRef = useRef(null);
     const requestRef = useRef(null);
     const prevRegsRef = useRef(null);
     const audioCtxRef = useRef(null);
@@ -722,17 +766,15 @@ export default function Emulator8086() {
     const keyboardDeviceRef = useRef(null); // Ref to the KeyboardDevice instance
     const shiftStateRef = useRef(0);        // Bit0=RShift, Bit1=LShift, Bit2=Ctrl, Bit3=Alt
 
-    const eng = useRef({
-        reg: { AX: 0, BX: 0, CX: 0, DX: 0, SI: 0, DI: 0, SP: INITIAL_SP, BP: 0, CS: 0, DS: 0, SS: 0, ES: 0, IP: 0 },
-        flags: { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 },
-        mem: new Uint8Array(ADDR_SPACE),
-        disk: new Uint8Array(DISK_SIZE),
-        floppy: new Uint8Array(FLOPPY_SIZE),
-        cursorX: 0,
-        cursorY: 0
-    });
+    const eng = useRef(createEngine());
 
-    const addLog = (msg) => setIoLogs(prev => [...prev, msg].slice(-200));
+    const addLog = (msg) => {
+        const logs = ioLogsRef.current;
+        logs.push(msg);
+        if (logs.length > 200) logs.splice(0, logs.length - 200);
+        if (!isRunningRef.current) forceRender();
+    };
+    const clearLogs = () => { ioLogsRef.current = []; };
 
     const getMemByteSafe = (phys) => {
         if (phys < ADDR_SPACE) return eng.current.mem[phys];
@@ -795,10 +837,7 @@ export default function Emulator8086() {
                     }
                 }
 
-                if (state.vga) {
-                    if (state.vga.cursorX !== undefined) en.cursorX = Math.min(Math.max(state.vga.cursorX, 0), 79);
-                    if (state.vga.cursorY !== undefined) en.cursorY = Math.min(Math.max(state.vga.cursorY, 0), 24);
-                }
+                if (state.cpu === '8086' || state.cpu === '186') setCpuModel(state.cpu);
 
                 if (state.memory && Array.isArray(state.memory)) {
                     for (const block of state.memory) {
@@ -810,6 +849,13 @@ export default function Emulator8086() {
                             writeMem8Safe(en, addr, val); 
                         }
                     }
+                }
+
+                // States saved before the BIOS moved behind the IVT have no ROM / vectors: install them
+                // (without touching the rest of RAM), and restore the cursor they stored separately.
+                if (en.mem[0x40] === 0 && en.mem[0x41] === 0 && en.mem[0x42] === 0 && en.mem[0x43] === 0) installRom(en);
+                if (state.vga && state.vga.cursorX !== undefined && state.vga.cursorY !== undefined) {
+                    setCursor(en, Math.min(Math.max(state.vga.cursorX, 0), VGA_COLS - 1), Math.min(Math.max(state.vga.cursorY, 0), VGA_ROWS - 1));
                 }
 
                 addLog(`✅ Nạp thành công State JSON ${state.description ? `(${state.description})` : ''}`);
@@ -866,7 +912,8 @@ export default function Emulator8086() {
             flags: Object.fromEntries(
                 Object.entries(en.flags).map(([k, v]) => [k, v ? 1 : 0])
             ),
-            vga: { cursorX: en.cursorX, cursorY: en.cursorY },
+            cpu: en.cpuModel,
+            vga: { cursorX: getCursor(en).x, cursorY: getCursor(en).y },
             memory: memBlocks
         };
 
@@ -892,52 +939,26 @@ export default function Emulator8086() {
         forceRender();
     };
 
-    const handleReset = () => {
+    // Single reset path for Reset, Assemble and Boot: rebuilds RAM, BIOS ROM/IVT/BDA and the devices.
+    const resetCPU = () => {
+        resetMachine(eng.current, { bus: busRef.current });
+        shiftStateRef.current = 0;
+        lastFrameRef.current = null;
+        setErrorMessage(null);
+        clearLogs();
+    };
+
+    const stopRunning = () => {
         setIsRunning(false);
         isRunningRef.current = false;
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        prevRegsRef.current = null;
-        const e = eng.current;
-        Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = INITIAL_SP;
-        e.reg.CS = BIOS_ENTRY_SEG;
-        e.reg.IP = BIOS_ENTRY_OFF;
-        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        e.mem.fill(0);
-        // Write reset vector at 0xFFFF:0x0000 — JMP FAR BIOS_ENTRY_SEG:BIOS_ENTRY_OFF
-        writeMem8Safe(e, RESET_VECTOR_PHYS,     0xEA);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 1, BIOS_ENTRY_OFF & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 2, (BIOS_ENTRY_OFF >> 8) & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 3, BIOS_ENTRY_SEG & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 4, (BIOS_ENTRY_SEG >> 8) & 0xFF);
-        e.cursorX = 0;
-        e.cursorY = 0;
-        setErrorMessage(null);
-        forceRender();
     };
 
-    const resetCPU = () => {
-        const e = eng.current;
-        Object.keys(e.reg).forEach(k => e.reg[k] = 0);
-        e.reg.SP = INITIAL_SP;
-        e.reg.CS = BIOS_ENTRY_SEG;
-        e.reg.IP = BIOS_ENTRY_OFF;
-        e.flags = { ZF: 0, SF: 0, CF: 0, OF: 0, DF: 0, IF: 1, AF: 0, PF: 0 };
-        e.mem.fill(0);
-        // Write reset vector at 0xFFFF:0x0000 — JMP FAR BIOS_ENTRY_SEG:BIOS_ENTRY_OFF
-        writeMem8Safe(e, RESET_VECTOR_PHYS,     0xEA);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 1, BIOS_ENTRY_OFF & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 2, (BIOS_ENTRY_OFF >> 8) & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 3, BIOS_ENTRY_SEG & 0xFF);
-        writeMem8Safe(e, RESET_VECTOR_PHYS + 4, (BIOS_ENTRY_SEG >> 8) & 0xFF);
-        e.cursorX = 0;
-        e.cursorY = 0;
-        // Initialise BDA keyboard circular buffer so head == tail (empty)
-        writeMemWord(e, BDA_KBD_HEAD_PHYS, BDA_KBD_BUF_OFF);
-        writeMemWord(e, BDA_KBD_TAIL_PHYS, BDA_KBD_BUF_OFF);
-        if (busRef.current) busRef.current.reset();
-        setErrorMessage(null);
-        setIoLogs([]);
+    const handleReset = () => {
+        stopRunning();
+        prevRegsRef.current = null;
+        resetCPU();
+        forceRender();
     };
 
     const initAudio = () => {
@@ -961,105 +982,78 @@ export default function Emulator8086() {
     };
 
     const stopAudio = () => {
-        if (oscRef.current) { try { oscRef.current.stop(); } catch (e) { } oscRef.current = null; }
+        if (oscRef.current) { try { oscRef.current.stop(); } catch { /* oscillator already stopped */ } oscRef.current = null; }
     };
 
-    // IBM PC scan codes for common keys
-    const SCAN_CODES = {
-        'Escape': 0x01, '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
-        '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A, '0': 0x0B, '-': 0x0C, '=': 0x0D,
-        'Backspace': 0x0E, 'Tab': 0x0F,
-        'q': 0x10, 'w': 0x11, 'e': 0x12, 'r': 0x13, 't': 0x14, 'y': 0x15, 'u': 0x16,
-        'i': 0x17, 'o': 0x18, 'p': 0x19, '[': 0x1A, ']': 0x1B, 'Enter': 0x1C,
-        'a': 0x1E, 's': 0x1F, 'd': 0x20, 'f': 0x21, 'g': 0x22, 'h': 0x23,
-        'j': 0x24, 'k': 0x25, 'l': 0x26, ';': 0x27, "'": 0x28, '`': 0x29,
-        '\\': 0x2B, 'z': 0x2C, 'x': 0x2D, 'c': 0x2E, 'v': 0x2F, 'b': 0x30,
-        'n': 0x31, 'm': 0x32, ',': 0x33, '.': 0x34, '/': 0x35,
-        ' ': 0x39,
-        'F1': 0x3B, 'F2': 0x3C, 'F3': 0x3D, 'F4': 0x3E, 'F5': 0x3F,
-        'F6': 0x40, 'F7': 0x41, 'F8': 0x42, 'F9': 0x43, 'F10': 0x44,
-        'ArrowUp': 0x48, 'ArrowLeft': 0x4B, 'ArrowRight': 0x4D, 'ArrowDown': 0x50,
-        'Insert': 0x52, 'Delete': 0x53, 'Home': 0x47, 'End': 0x4F,
-        'PageUp': 0x49, 'PageDown': 0x51,
+    // ----- Keyboard ------------------------------------------------------------------------
+    // The host plays the role of the BIOS keyboard ISR: a browser key event becomes (ASCII, scan code).
+    // The pair goes into the BDA buffer for INT 16h, and the scan code is also delivered through the
+    // keyboard controller (port 0x60, make code on press / break code on release) with an IRQ1 pulse,
+    // so programs that install their own INT 9 handler see real hardware behaviour.
+    const KEY_SHIFT_BITS = { Shift: 0, Control: 0x04, Alt: 0x08 };
+    const MODIFIER_SCAN = { Control: 0x1D, Alt: 0x38, LeftShift: 0x2A, RightShift: 0x36 };
+
+    const deliverScancode = (code) => {
+        keyboardDeviceRef.current.pushScancode(code);
+        if (picRef.current) picRef.current.pulseIRQ(1);
     };
-    // Uppercase / shifted chars share scan code with their base key
-    const SHIFTED_SCAN = {
-        'Q':0x10,'W':0x11,'E':0x12,'R':0x13,'T':0x14,'Y':0x15,'U':0x16,'I':0x17,'O':0x18,'P':0x19,
-        'A':0x1E,'S':0x1F,'D':0x20,'F':0x21,'G':0x22,'H':0x23,'J':0x24,'K':0x25,'L':0x26,
-        'Z':0x2C,'X':0x2D,'C':0x2E,'V':0x2F,'B':0x30,'N':0x31,'M':0x32,
-        '!':0x02,'@':0x03,'#':0x04,'$':0x05,'%':0x06,'^':0x07,'&':0x08,'*':0x09,'(':0x0A,')':0x0B,
-        '_':0x0C,'+':0x0D,'{':0x1A,'}':0x1B,'|':0x2B,':':0x27,'"':0x28,'~':0x29,'<':0x33,'>':0x34,'?':0x35,
+
+    const setShiftState = (mutate) => {
+        shiftStateRef.current = mutate(shiftStateRef.current) & 0xFF;
+        wb(eng.current, BDA.KBD_FLAGS1, shiftStateRef.current);
     };
-    // Extended (non-ASCII) keys: char=0, scan in high byte
-    const EXTENDED_KEYS = new Set(['ArrowUp','ArrowLeft','ArrowRight','ArrowDown','Insert','Delete','Home','End','PageUp','PageDown','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10']);
+
+    const modifierScan = (e) => (e.key === 'Shift' ? (e.location === 2 ? MODIFIER_SCAN.RightShift : MODIFIER_SCAN.LeftShift) : MODIFIER_SCAN[e.key]);
+    const modifierBit = (e) => (e.key === 'Shift' ? (e.location === 2 ? 0x01 : 0x02) : KEY_SHIFT_BITS[e.key]);
+
+    /** Browser key event -> { ascii, scan } or null for keys that produce nothing. */
+    const translateKey = (e) => {
+        if (e.key.length === 1) {
+            let ascii = e.key.charCodeAt(0);
+            const scan = SCAN_CODES[e.key] || SCAN_CODES[e.key.toLowerCase()] || SHIFTED_SCAN[e.key] || 0;
+            if (ascii > 0x7E) return null;                                       // outside ASCII: the BIOS has no code for it
+            if (e.ctrlKey && /^[a-z]$/i.test(e.key)) ascii = e.key.toUpperCase().charCodeAt(0) - 64; // Ctrl+letter = control code
+            else if (e.altKey) ascii = 0;                                        // Alt combinations: scan code only
+            return { ascii, scan };
+        }
+        if (e.key === 'Enter') return { ascii: 0x0D, scan: 0x1C };
+        if (e.key === 'Backspace') return { ascii: 0x08, scan: 0x0E };
+        if (e.key === 'Escape') return { ascii: 0x1B, scan: 0x01 };
+        if (e.key === 'Tab') return { ascii: 0x09, scan: 0x0F };
+        if (EXTENDED_KEYS.has(e.key)) return { ascii: 0x00, scan: SCAN_CODES[e.key] || 0 };
+        return null;
+    };
+
+    // One handler on the root element sees every key; it only acts while focus is inside a keyboard-capture
+    // region (the VGA screen or the "Type here" field), so typing in the code editor never reaches the emulator.
+    const inCaptureRegion = (e) => !!(e.target && e.target.closest && e.target.closest('[data-kbd-capture]'));
 
     const handleKeyDown = (e) => {
-        // Track shift/ctrl/alt state and mirror into BDA status byte
-        if (e.key === 'Shift') {
-            shiftStateRef.current |= e.location === 2 ? 0x01 : 0x02;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+        if (!inCaptureRegion(e)) return;
+        if (e.key in KEY_SHIFT_BITS) {
+            e.preventDefault();
+            setShiftState(s => s | modifierBit(e));
+            deliverScancode(modifierScan(e));
             return;
         }
-        if (e.key === 'Control') {
-            shiftStateRef.current |= 0x04;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
-            return;
-        }
-        if (e.key === 'Alt') {
-            shiftStateRef.current |= 0x08;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
-            return;
-        }
-
-        let charCode = 0;
-        let scanCode = 0;
-
-        if (e.key.length === 1) {
-            charCode = e.key.charCodeAt(0);
-            scanCode = SCAN_CODES[e.key] || SHIFTED_SCAN[e.key] || 0;
-        } else if (e.key === 'Enter') {
-            charCode = 0x0D; scanCode = 0x1C;
-        } else if (e.key === 'Backspace') {
-            charCode = 0x08; scanCode = 0x0E;
-        } else if (e.key === 'Escape') {
-            charCode = 0x1B; scanCode = 0x01;
-        } else if (e.key === 'Tab') {
-            charCode = 0x09; scanCode = 0x0F;
-        } else if (EXTENDED_KEYS.has(e.key)) {
-            charCode = 0x00; scanCode = SCAN_CODES[e.key] || 0;
-        } else {
-            return; // Ignore modifier-only keys
-        }
-
-        // Write entry into the BDA circular keyboard buffer.
-        // head and tail store BDA-relative offsets (0x1E–0x3C).
-        // Entry word: low byte = ASCII, high byte = scan code.
-        const tail = readMemWord(eng.current, BDA_KBD_TAIL_PHYS);
-        const nextTail = (tail + 2 >= BDA_KBD_BUF_END_OFF) ? BDA_KBD_BUF_OFF : tail + 2;
-        const head = readMemWord(eng.current, BDA_KBD_HEAD_PHYS);
-        if (nextTail !== head) { // buffer not full
-            writeMemWord(eng.current, BDA_SEG_PHYS + tail, ((scanCode & 0xFF) << 8) | (charCode & 0xFF));
-            writeMemWord(eng.current, BDA_KBD_TAIL_PHYS, nextTail);
-        }
-
-        // Also enqueue in the JS KeyboardDevice for display in the keyboard panel.
-        keyboardDeviceRef.current.enqueue(charCode, scanCode);
-        // Raise IRQ1 (keyboard) on the PIC
-        if (picRef.current) picRef.current.raiseIRQ(1);
+        const key = translateKey(e);
+        if (!key) return;
+        e.preventDefault(); // keep the page from scrolling / tabbing away
+        enqueueKey(eng.current, key.ascii, key.scan);
+        keyboardDeviceRef.current.enqueue(key.ascii, key.scan);
+        deliverScancode(key.scan);
         forceRender();
     };
 
     const handleKeyUp = (e) => {
-        if (e.key === 'Shift') {
-            shiftStateRef.current &= e.location === 2 ? ~0x01 : ~0x02;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
-        } else if (e.key === 'Control') {
-            shiftStateRef.current &= ~0x04;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
-        } else if (e.key === 'Alt') {
-            shiftStateRef.current &= ~0x08;
-            writeMem8Safe(eng.current, BDA_KBD_STATUS1_PHYS, shiftStateRef.current & 0xFF);
+        if (!inCaptureRegion(e)) return;
+        if (e.key in KEY_SHIFT_BITS) {
+            setShiftState(s => s & ~modifierBit(e));
+            deliverScancode(modifierScan(e) | 0x80);
+            return;
         }
+        const key = translateKey(e);
+        if (key && key.scan) deliverScancode(key.scan | 0x80);
     };
 
     // Initialize I/O bus and devices
@@ -1081,6 +1075,7 @@ export default function Emulator8086() {
         speakerRef.current = speaker;
         picRef.current = pic;
         keyboardDeviceRef.current = keyboard;
+        resetMachine(eng.current, { bus }); // power-on: BIOS ROM, IVT, BDA, parked at the reset vector
     }
 
     const getCpuContext = () => ({
@@ -1094,62 +1089,84 @@ export default function Emulator8086() {
         return executeStep(eng.current, getCpuContext());
     };
 
+    // The run loop stopped because the CPU did: a fatal exception (message from the BIOS) or HLT with nothing to wake it.
+    const reportStop = () => {
+        const e = eng.current;
+        if (e.fault) { setErrorMessage(e.fault); addLog('✖ ' + e.fault); e.fault = null; }
+        else addLog('CPU halted (HLT, no interrupt can wake it)');
+    };
+
     const stepUI = () => {
         try {
             const e = eng.current;
             const cs = e.reg.CS, ipBefore = e.reg.IP;
             prevRegsRef.current = { reg: { ...e.reg }, flags: { ...e.flags } };
-            executeStepLocal();
+            const alive = executeStepLocal();
             const ipAfter = e.reg.IP;
             const len = ((ipAfter - ipBefore) & 0xFFFF) || 1;
             const bytes = [];
             for (let i = 0; i < Math.min(len, 8); i++) bytes.push(readMem8(e, calcPhys(cs, (ipBefore + i) & 0xFFFF)));
             addLog(`${toHex(cs)}:${toHex(ipBefore)} | ${bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`);
+            if (!alive) reportStop();
             forceRender();
-        } catch (ex) { setErrorMessage(ex.message); setIsRunning(false); isRunningRef.current = false; }
+        } catch (ex) { setErrorMessage(ex.message); stopRunning(); }
     };
 
-    const runLoop = useCallback(() => {
+    // Time-based execution: each animation frame retires as many instructions as the selected speed
+    // allows for the elapsed time, but never holds the UI thread longer than FRAME_TIME_BUDGET_MS.
+    const runLoop = useCallback((timestamp) => {
         if (!isRunningRef.current) return;
-        let ok = true;
-        try { for (let i = 0; i < 20; i++) { if (!executeStepLocal()) { ok = false; break; } } } 
-        catch (ex) { setErrorMessage(ex.message); ok = false; }
+        const dt = lastFrameRef.current === null ? 16.7 : Math.min(Math.max(timestamp - lastFrameRef.current, 0), MAX_FRAME_DELTA_MS);
+        lastFrameRef.current = timestamp;
+        const ips = speedRef.current;
+        const budget = ips === Infinity ? Infinity : Math.max(1, Math.round(ips * dt / 1000));
+        const deadline = performance.now() + FRAME_TIME_BUDGET_MS;
+        let keepRunning = true;
+        try {
+            for (let n = 0; n < budget; n++) {
+                if (!executeStepLocal()) { keepRunning = false; break; }
+                if ((n & 0x3FF) === 0x3FF && performance.now() > deadline) break;
+            }
+        } catch (ex) { setErrorMessage(ex.message); keepRunning = false; }
+        refreshTicks(eng.current, Date.now());
         forceRender();
-        if (ok) requestRef.current = requestAnimationFrame(runLoop);
-        else { setIsRunning(false); isRunningRef.current = false; }
+        if (keepRunning) requestRef.current = requestAnimationFrame(runLoop);
+        else { stopRunning(); reportStop(); }
     }, []);
 
-    const clearPrevRegs = () => { prevRegsRef.current = null; };
+    const startRunning = () => {
+        prevRegsRef.current = null;
+        lastFrameRef.current = null;
+        setIsRunning(true); isRunningRef.current = true;
+        requestRef.current = requestAnimationFrame(runLoop);
+    };
 
     const toggleRun = () => {
-        if (isRunning) {
-            setIsRunning(false); isRunningRef.current = false;
-            if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        } else {
-            prevRegsRef.current = null;
-            setIsRunning(true); isRunningRef.current = true;
-            requestRef.current = requestAnimationFrame(runLoop);
-        }
+        if (isRunning) stopRunning();
+        else startRunning();
+    };
+
+    // CPU selector: applies to the emulated CPU immediately (assembling may raise it, see assemble()).
+    const setCpuModel = (model) => {
+        eng.current.cpuModel = model;
+        setCpuModelState(model);
     };
 
     const assemble = () => {
         try {
             setErrorMessage(null);
-            // The ORG field is only a fallback: any ORG in the source wins, and the
-            // assembler reports the address it actually built for. Never re-derive
-            // the load address by re-parsing the source text here.
+            // The ORG field and the CPU selector are only fallbacks: an ORG / `cpu` directive in the
+            // source wins, and the assembler reports the load address and CPU level it actually built
+            // for. Never re-derive either by re-parsing the source text here.
             const fallbackOrg = parseInt(orgOffset.replace(/0x/i, ''), 16) || 0;
             const assembler = new Assembler8086();
-            const binary = assembler.assemble(code, { origin: fallbackOrg });
+            const binary = assembler.assemble(code, { origin: fallbackOrg, cpu: cpuModel });
             const startIP = assembler.origin;
             resetCPU();
-            const e = eng.current;
-            for (let i = 0; i < binary.length; i++) {
-                writeMem8Safe(e, startIP + i, binary[i]);
-            }
-            e.reg.CS = 0x0000;
-            e.reg.IP = startIP;
-            addLog(`Assembled: ${binary.length} bytes loaded at ${toHex(startIP, 4)} (CS:IP = 0000:${toHex(startIP, 4)})`);
+            startProgram(eng.current, binary, startIP);
+            setCpuModel(assembler.cpu);
+            addLog(`Assembled: ${binary.length} bytes loaded at ${toHex(startIP, 4)} (CS:IP = 0000:${toHex(startIP, 4)}, CPU ${assembler.cpu === '186' ? '80186' : '8086'})`);
+            assembler.warnings.forEach(w => addLog(`⚠ ${w}`));
             forceRender();
         } catch (err) {
             setErrorMessage(`Assemble error: ${err.message}`);
@@ -1158,21 +1175,24 @@ export default function Emulator8086() {
 
     const bootFromDisk = () => {
         const e = eng.current;
-        if (e.disk[SECTOR_SIZE - 2] !== 0x55 || e.disk[SECTOR_SIZE - 1] !== 0xAA) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
+        if (!hasBootSignature(e.disk)) { setErrorMessage("Boot signature 0xAA55 not found!"); return; }
         resetCPU();
-        for (let i = 0; i < SECTOR_SIZE; i++) e.mem[BOOT_LOAD_ADDR + i] = e.disk[i];
-        e.reg.IP = BOOT_LOAD_ADDR; e.reg.CS = 0x0000;
-        addLog(`BIOS: Booting from disk at ${toHex(BOOT_LOAD_ADDR, 4)}...`);
-        setIsRunning(true); isRunningRef.current = true;
-        requestRef.current = requestAnimationFrame(runLoop);
+        loadBootSector(e);
+        addLog(`BIOS: Booting from disk at ${toHex(BOOT_LOAD_ADDR, 4)} (DL=80h)...`);
+        startRunning();
     };
+
+    useEffect(() => {
+        speedRef.current = (SPEEDS.find(s => s.id === speedId) || SPEEDS[0]).ips;
+    }, [speedId]);
 
     useEffect(() => {
         return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); stopAudio(); };
     }, []);
 
     const e = eng.current;
-    const hasBootSig = e.disk[SECTOR_SIZE - 2] === 0x55 && e.disk[SECTOR_SIZE - 1] === 0xAA;
+    const hasBootSig = hasBootSignature(e.disk);
+    const cursor = getCursor(e);
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono selection:bg-blue-500/30" onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} tabIndex="0">
@@ -1182,6 +1202,7 @@ export default function Emulator8086() {
                     isRunning={isRunning} initAudio={initAudio}
                     bootFromDisk={bootFromDisk} assemble={assemble} handleReset={handleReset}
                     toggleRun={toggleRun} stepUI={stepUI} loadStateFromJson={loadStateFromJson} saveStateToJson={saveStateToJson}
+                    speedId={speedId} setSpeedId={setSpeedId}
                 />
 
                 {errorMessage && (
@@ -1192,12 +1213,12 @@ export default function Emulator8086() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     <div className="lg:col-span-4 space-y-4 flex flex-col">
-                        <CodeEditor code={code} setCode={setCode} orgOffset={orgOffset} setOrgOffset={setOrgOffset} />
+                        <CodeEditor code={code} setCode={setCode} orgOffset={orgOffset} setOrgOffset={setOrgOffset} cpuModel={cpuModel} setCpuModel={setCpuModel} />
                     </div>
 
                     <div className="lg:col-span-6 space-y-4">
-                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={e.cursorX} cursorY={e.cursorY} onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} />
-                        <KeyboardPanel keyboardDevice={keyboardDeviceRef.current} handleKeyDown={handleKeyDown} handleKeyUp={handleKeyUp} forceRender={forceRender} />
+                        <VGAMonitor memory={e.mem} cs={e.reg.CS} ip={e.reg.IP} cursorX={cursor.x} cursorY={cursor.y} />
+                        <KeyboardPanel keyboardDevice={keyboardDeviceRef.current} forceRender={forceRender} />
                         <MemoryViewer 
                             title="Memory View 1" 
                             getMemByte={getMemByteSafe} 
@@ -1222,7 +1243,7 @@ export default function Emulator8086() {
                     </div>
 
                     <div className="lg:col-span-2 space-y-4">
-                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogs} prevRegs={prevRegsRef.current} speakerRef={speakerRef} />
+                        <RegistersPanel eng={eng} isRunning={isRunning} handleRegChange={handleRegChange} handleFlagChange={handleFlagChange} packFlags={packFlags} hasBootSig={hasBootSig} ioLogs={ioLogsRef.current} prevRegs={prevRegsRef.current} speakerRef={speakerRef} />
                         <IOPortPanel bus={busRef.current} addLog={addLog} />
                     </div>
                 </div>

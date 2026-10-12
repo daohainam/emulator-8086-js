@@ -23,7 +23,12 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^_' }],
     },
+  },
+  {
+    // Node-side test code (vitest): needs Node globals such as `process`.
+    files: ['test/**/*.js'],
+    languageOptions: { globals: globals.node },
   },
 ])

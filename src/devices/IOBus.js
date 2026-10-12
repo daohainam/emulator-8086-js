@@ -20,8 +20,8 @@ class IOBus {
             }
             this.portMap.get(port).push(device);
         }
-        // Auto-detect PIC device
-        if (device.constructor.name === 'PIC8259Device') {
+        // Auto-detect the PIC by its interface (constructor names do not survive minification)
+        if (typeof device.acknowledge === 'function' && typeof device.raiseIRQ === 'function') {
             this.pic = device;
         }
     }
@@ -43,7 +43,9 @@ class IOBus {
                 if (val !== undefined) return val & 0xFF;
             }
         }
-        return this.ports[p];
+        // A port some device claims but that has no read handler reads back the last value written
+        // (write-only registers). A port nothing claims is a floating bus and reads as 0xFF.
+        return interested ? this.ports[p] : 0xFF;
     }
 
     readWord(port) {
